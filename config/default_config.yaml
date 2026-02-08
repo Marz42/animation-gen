@@ -1,0 +1,283 @@
+# 动画生成系统 - 全局默认配置
+# 位置: ~/.animation_gen/config.yaml
+
+defaults:
+  # API设置
+  llm:
+    provider: "openai"  # 使用openai兼容格式
+    base_url: "https://api.jiekou.ai/openai"  # 接口AI代理
+    model: "gemini-3-flash-preview"  # 或其他支持的模型
+    temperature: 0.7
+    max_tokens: 4096
+    timeout: 60
+  
+  image:
+    provider: "jiekouai"
+    base_url: "https://api.jiekou.ai"
+    endpoint: "/v3/nano-banana-pro-light-t2i"
+    default_steps: 30
+    default_cfg: 7.0
+    timeout: 120
+  
+  video:
+    provider: "jiekouai"  # jiekouai / mock
+    base_url: "https://api.jiekou.ai"
+    duration: "5s"  # 4s / 5s / 6s / 8s / 10s
+    timeout: 300
+  
+  # 生成参数
+  generation:
+    resolution: "1280x720"
+    frame_rate: 24
+    character_ref_resolution: "512x512"
+    scene_ref_resolution: "768x432"
+    keyframe_resolution: "1280x720"
+  
+  # 并行配置
+  concurrency:
+    llm_workers: 8
+    image_workers: 4
+    video_workers: 2
+    max_retries: 3
+    retry_delay: 5  # 秒
+  
+  # 限流配置
+  rate_limits:
+    nanobanana:
+      requests_per_minute: 10
+      requests_per_second: 2
+    sora2:
+      requests_per_minute: 5
+      requests_per_second: 1
+    veo3:
+      requests_per_minute: 5
+      requests_per_second: 1
+  
+  # 成本限制
+  cost_limits:
+    max_cost_per_project_usd: 100.0
+    warn_threshold_usd: 50.0
+  
+  # 错误恢复
+  recovery:
+    zombie_task_timeout: 300  # 5分钟无更新视为僵尸任务
+    max_polling_attempts: 60
+    polling_interval: 10  # 秒
+
+# 多LLM提供商配置
+providers:
+  openai:
+    models: 
+      - "gpt-4"
+      - "gpt-4-turbo-preview"
+      - "gpt-3.5-turbo"
+  
+  anthropic:
+    base_url: "https://api.anthropic.com"
+    models:
+      - "claude-3-opus-20240229"
+      - "claude-3-sonnet-20240229"
+      - "claude-3-haiku-20240307"
+  
+  openrouter:
+    base_url: "https://openrouter.ai/api/v1"
+    models:
+      - "google/gemini-pro"
+      - "meta-llama/llama-3-70b-instruct"
+      - "anthropic/claude-3-opus"
+
+# LLM提示词模板
+prompts:
+  character_extraction: |
+    你是一位经验丰富的影视角色分析专家。请从以下剧本中提取所有主要角色信息。
+    
+    ## 角色识别标准
+    只识别在当前剧本中实际出场的角色（被提到但未出场的角色不要识别）：
+    - ✅ 有具体名字的角色（如"孙悟空"、"张三"）
+    - ✅ 有特定称号的主要角色（如"美猴王"、"老板"）
+    - ✅ 第一人称叙述中的"我"
+    - ❌ 群体角色（如"众猴"、"路人"、"士兵们"）
+    - ❌ 旁白/画外音
+    
+    ## 角色名称一致性
+    - 同一角色的不同称呼必须统一为一个名称
+    - 选择最常用、最正式的称呼
+    - 例如："石猴"后来被称为"美猴王"，统一使用"美猴王"
+    
+    ## 输出格式
+    {
+      "characters": [
+        {
+          "name": "统一的角色名",
+          "description": "剧本中描述的外貌特征（发型、服装、体型、面部特征等）",
+          "personality": "剧本中体现的性格特点（内向/外向、勇敢/胆小、乐观/悲观等）"
+        }
+      ]
+    }
+    
+    ## 注意事项
+    1. 只提取剧本中明确提到的角色
+    2. 外貌和性格必须基于剧本中的描述，没有则留空
+    3. 不要编造剧本中没有的角色
+    
+    剧本内容：
+    [[SCRIPT]]
+  
+  scene_extraction: |
+    你是一位经验丰富的影视制片人和场景分析专家。请将以下剧本按"场景"维度进行结构化分解。
+    
+    ## 场景划分标准
+    按照"地点+时间段"的组合进行划分，满足以下任一条件就分为新场景：
+    
+    ### 地点变化
+    - 地点有细微变化就分为新场景
+    - 例如："山顶"→"山脚"→"山洞内部" = 三个不同场景
+    - 例如："客厅"→"卧室"→"厨房" = 三个不同场景
+    - 例如："街道"→"咖啡馆"→"办公室" = 三个不同场景
+    
+    ### 时间段变化
+    - 在同一地点，时间段变化也要分为新场景
+    - 时间段只需标注大致时段：白天/夜晚/傍晚/清晨/中午等
+    - 例如："山顶，清晨"和"山顶，傍晚" = 两个不同场景
+    
+    ### 场景合并原则
+    - 如果是室内场景，同一建筑物内的不同房间在连续剧情中应合并为一个大场景
+    - 例如："我家，中午"（包含厨房→客厅→卧室的连续剧情）
+    - 如果是室外场景，地点跨度较大时仍需分开（如"山脚"→"山顶"）
+    
+    ## 场景命名规范
+    - 格式："地点，时间段"
+    - 地点要具体明确，能让人清晰理解是什么地方
+    - 时间段用通用词汇：白天/夜晚/傍晚/清晨/中午/深夜等
+    
+    ## 角色识别规则
+    只识别在当前场景中实际出场的角色（被提及但未出场的不计入）：
+    - ✅ 有具体名字的角色
+    - ✅ 有特定称号的主要角色
+    - ❌ 群体角色
+    - ❌ 仅在对话中被提及但未出场的角色
+    
+    ## 输出格式
+    {
+      "scenes": [
+        {
+          "name": "场景名称（地点，时间段）",
+          "description": "场景的完整描述，包括环境、氛围、重要视觉元素",
+          "location": "地点",
+          "time": "时间段（白天/夜晚/傍晚/清晨/中午/深夜）",
+          "characters": ["场景中出现的角色1", "角色2"]
+        }
+      ]
+    }
+    
+    ## 注意事项
+    1. 场景必须完整覆盖所有剧情，不能有遗漏
+    2. 相同场景+相同时间段的连续剧情应该合并为一个场景对象
+    3. 同一角色的名称在不同场景中要保持一致
+    4. 只识别实际出场的场景和角色
+    
+    剧本内容：
+    [[SCRIPT]]
+  
+  character_ref_prompt: |
+    你是一名资深的角色设计师和AI提示词描述师。
+    
+    基于以下角色描述和整体风格，生成一个用于AI图片生成的详细提示词。
+    提示词应该描述角色的完整外观，适合作为角色参考图。
+    
+    角色信息：
+    - 名称: {name}
+    - 描述: {description}
+    - 性格: {personality}
+    
+    整体风格: {style}
+    
+    请只输出提示词本身，不要有其他说明。
+  
+  scene_ref_prompt: |
+    你是一名经验丰富的场景美术设计师和概念艺术家。
+    
+    基于以下场景描述和整体风格，生成一个用于AI图片生成的详细提示词。
+    提示词应该描述场景的氛围和环境，适合作为场景参考图（不要包含具体人物）。
+    
+    场景信息：
+    - 名称: {name}
+    - 描述: {description}
+    - 地点: {location}
+    - 时间: {time}
+    
+    整体风格: {style}
+    
+    请只输出提示词本身，不要有其他说明。
+  
+  shot_design: |
+    你是一名专业的分镜师。请为以下场景设计分镜。
+    
+    场景信息：
+    - 场景名称: {scene_name}
+    - 场景描述: {scene_description}
+    - 涉及角色: {characters}
+    
+    剧本片段：
+    {script_segment}
+    
+    请设计3-5个分镜，每个分镜包含：
+    - 镜头类型 (wide/medium/close_up/extreme_close_up)
+    - 镜头运动 (static/pan/tilt/zoom/tracking)
+    - 持续时间 (重要：必须是以下之一: 4s/5s/6s/8s/10s)
+    - 画面描述
+    - 动作描述
+    - 对话（如果有）
+    
+    重要规则：
+    - duration 字段必须是 "4s", "5s", "6s", "8s", 或 "10s" 之一
+    - 不要使用其他时长如 "2s", "3s", "7s", "9s" 等
+    - 根据剧情节奏选择合适的标准时长
+    
+    请以JSON格式输出：
+    {
+      "shots": [
+        {
+          "type": "wide",
+          "camera_movement": "static",
+          "duration": "5s",
+          "description": "画面描述",
+          "action": "动作描述",
+          "dialogue": "对话内容或null"
+        }
+      ]
+    }
+  
+  image_prompt: |
+    你是一名AI提示词工程师。基于以下信息生成图片生成提示词。
+    
+    分镜描述: {shot_description}
+    涉及角色: {characters}
+    场景参考: {scene_ref}
+    整体风格: {style}
+    
+    请生成：
+    1. 正面提示词 (positive prompt)
+    2. 负面提示词 (negative prompt)
+    
+    请以JSON格式输出：
+    {
+      "positive": "详细的正面提示词",
+      "negative": "负面提示词，如：bad anatomy, bad hands, worst quality..."
+    }
+  
+  video_prompt: |
+    基于以下分镜信息生成视频生成提示词，重点描述运动和运镜。
+    
+    分镜描述: {shot_description}
+    动作描述: {action_description}
+    镜头运动: {camera_movement}
+    持续时间: {duration}
+    首帧描述: {keyframe_description}
+    
+    请生成一个详细的视频描述，包含：
+    - 画面主体动作
+    - 相机运动方式
+    - 光影变化（如果有）
+    
+    请只输出视频描述文本。
