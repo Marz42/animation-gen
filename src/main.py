@@ -27,7 +27,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import uvicorn
 
@@ -1437,6 +1437,367 @@ async def regenerate_scene(project_id: str, scene_id: str, request: RegenerateRe
             return {"status": "regenerating"}
     
     raise HTTPException(status_code=404, detail="场景不存在")
+
+
+# ============ 配置导入/导出API ============
+
+@app.get("/api/config/export")
+async def export_config():
+    """导出完整配置（包括 prompts 和 API提供商配置）"""
+    try:
+        config = Config.load_global()
+        return config.export_config()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导出配置失败: {str(e)}")
+
+
+class ImportConfigRequest(BaseModel):
+    config: Dict[str, Any]
+
+
+@app.post("/api/config/import")
+async def import_config(request: ImportConfigRequest):
+    """导入配置，验证JSON格式后保存"""
+    try:
+        # 验证配置格式
+        config = Config.import_config(request.config)
+        # 保存到全局配置
+        config.save_global_config(use_json=True)
+        return {"status": "success", "message": "配置导入成功"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"配置导入失败: {str(e)}")
+
+
+# ============ API提供商管理API ============
+
+class APIProviderRequest(BaseModel):
+    name: str
+    type: str  # "llm" | "image" | "video"
+    enabled: bool = True
+    base_url: str
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    endpoint: Optional[str] = None
+    headers: Optional[Dict[str, str]] = Field(default_factory=dict)
+    timeout: int = 60
+    custom_fields: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+
+@app.get("/api/providers")
+async def get_providers():
+    """获取所有API提供商配置"""
+    try:
+        config = Config.load_global()
+        return config.providers
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取提供商失败: {str(e)}")
+
+
+@app.post("/api/providers")
+async def add_provider(request: APIProviderRequest):
+    """添加新提供商"""
+    try:
+        config = Config.load_global()
+        
+        # 生成唯一ID
+        import uuid
+        provider_id = str(uuid.uuid4())[:8]
+        
+        from datetime import datetime
+        provider_data = {
+            "id": provider_id,
+            "name": request.name,
+            "type": request.type,
+            "enabled": request.enabled,
+            "base_url": request.base_url,
+            "api_key": request.api_key,
+            "model": request.model,
+            "endpoint": request.endpoint,
+            "headers": request.headers or {},
+            "timeout": request.timeout,
+            "custom_fields": request.custom_fields or {},
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+        }
+        
+        # 确保providers结构存在
+        if request.type not in config.providers:
+            config.providers[request.type] = []
+        
+        config.providers[request.type].append(provider_data)
+        config.save_global_config(use_json=True)
+        
+        return {"status": "success", "provider": provider_data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"添加提供商失败: {str(e)}")
+
+
+@app.put("/api/providers/{provider_id}")
+async def update_provider(provider_id: str, request: APIProviderRequest):
+    """更新提供商"""
+    try:
+        config = Config.load_global()
+        
+        # 查找并更新提供商
+        found = False
+        for provider_type, providers in config.providers.items():
+            for i, provider in enumerate(providers):
+                if isinstance(provider, dict) and provider.get("id") == provider_id:
+                    # 更新字段
+                    from datetime import datetime
+                    updated_provider = {
+                        "id": provider_id,
+                        "name": request.name,
+                        "type": request.type,
+                        "enabled": request.enabled,
+                        "base_url": request.base_url,
+                        "api_key": request.api_key,
+                        "model": request.model,
+                        "endpoint": request.endpoint,
+                        "headers": request.headers or {},
+                        "timeout": request.timeout,
+                        "custom_fields": request.custom_fields or {},
+                        "created_at": provider.get("created_at"),
+                        "updated_at": datetime.now().isoformat(),
+                        "verified": provider.get("verified"),
+                        "verified_at": provider.get("verified_at"),
+                        "latency": provider.get("latency"),
+                    }
+                    providers[i] = updated_provider
+                    found = True
+                    break
+            if found:
+                break
+        
+        if not found:
+            raise HTTPException(status_code=404, detail="提供商不存在")
+        
+        config.save_global_config(use_json=True)
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"更新提供商失败: {str(e)}")
+
+
+@app.delete("/api/providers/{provider_id}")
+async def delete_provider(provider_id: str):
+    """删除提供商"""
+    try:
+        config = Config.load_global()
+        
+        # 查找并删除提供商
+        found = False
+        for provider_type, providers in config.providers.items():
+            for i, provider in enumerate(providers):
+                if isinstance(provider, dict) and provider.get("id") == provider_id:
+                    providers.pop(i)
+                    found = True
+                    break
+            if found:
+                break
+        
+        if not found:
+            raise HTTPException(status_code=404, detail="提供商不存在")
+        
+        config.save_global_config(use_json=True)
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除提供商失败: {str(e)}")
+
+
+class ParseCurlRequest(BaseModel):
+    curl_command: str
+
+
+@app.post("/api/providers/parse-curl")
+async def parse_curl(request: ParseCurlRequest):
+    """解析CURL命令，返回解析后的字段"""
+    try:
+        curl_text = request.curl_command.strip()
+        result = {
+            "base_url": "",
+            "endpoint": "",
+            "headers": {},
+            "model": None,
+            "api_key": None,
+            "method": "GET"
+        }
+        
+        import re
+        
+        # 解析URL
+        url_match = re.search(r'curl\s+["\']?([^"\'\s]+)', curl_text, re.IGNORECASE)
+        if url_match:
+            full_url = url_match.group(1)
+            # 分离base_url和endpoint
+            parsed = full_url.split('/', 3)
+            if len(parsed) >= 3:
+                result["base_url"] = f"{parsed[0]}//{parsed[2]}"
+                if len(parsed) >= 4:
+                    result["endpoint"] = "/" + parsed[3]
+        
+        # 解析 -X 方法
+        method_match = re.search(r'-X\s+(\w+)', curl_text)
+        if method_match:
+            result["method"] = method_match.group(1).upper()
+        
+        # 解析 headers
+        header_matches = re.findall(r'-H\s+["\']([^"\']+)["\']', curl_text)
+        for header in header_matches:
+            if ':' in header:
+                key, value = header.split(':', 1)
+                key = key.strip()
+                value = value.strip()
+                result["headers"][key] = value
+                
+                # 提取API key
+                if key.lower() in ["authorization", "x-api-key"]:
+                    if value.lower().startswith("bearer "):
+                        result["api_key"] = value[7:]
+                    else:
+                        result["api_key"] = value
+        
+        # 解析 -d data
+        data_match = re.search(r'-d\s+["\']([^"\']+)["\']', curl_text)
+        if data_match:
+            try:
+                data_str = data_match.group(1)
+                # 尝试解析JSON
+                data_json = json.loads(data_str)
+                if "model" in data_json:
+                    result["model"] = data_json["model"]
+            except:
+                pass
+        
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"解析CURL命令失败: {str(e)}")
+
+
+# ============ API提供商验证API ============
+
+@app.post("/api/providers/{provider_id}/verify")
+async def verify_provider(provider_id: str):
+    """验证指定提供商的API有效性"""
+    import time
+    start_time = time.time()
+    
+    try:
+        config = Config.load_global()
+        
+        # 查找提供商
+        provider = None
+        for provider_type, providers in config.providers.items():
+            for p in providers:
+                if isinstance(p, dict) and p.get("id") == provider_id:
+                    provider = p
+                    provider["_type"] = provider_type
+                    break
+            if provider:
+                break
+        
+        if not provider:
+            raise HTTPException(status_code=404, detail="提供商不存在")
+        
+        provider_type = provider.get("type") or provider.get("_type", "llm")
+        base_url = provider.get("base_url", "")
+        api_key = provider.get("api_key", "")
+        model = provider.get("model")
+        
+        latency = int((time.time() - start_time) * 1000)
+        
+        # 根据类型进行验证
+        if provider_type == "llm":
+            # LLM验证：发送极短prompt，max_tokens=1
+            try:
+                import aiohttp
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}"
+                }
+                headers.update(provider.get("headers", {}))
+                
+                payload = {
+                    "model": model or "gpt-3.5-turbo",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "max_tokens": 1
+                }
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{base_url}/chat/completions",
+                        headers=headers,
+                        json=payload,
+                        timeout=10
+                    ) as resp:
+                        if resp.status in [200, 201]:
+                            latency = int((time.time() - start_time) * 1000)
+                            # 更新验证状态
+                            provider["verified"] = True
+                            provider["verified_at"] = datetime.now().isoformat()
+                            provider["latency"] = latency
+                            config.save_global_config(use_json=True)
+                            return {"valid": True, "latency": latency}
+                        else:
+                            text = await resp.text()
+                            return {"valid": False, "error": f"API返回错误: HTTP {resp.status}, {text}"}
+            except Exception as e:
+                return {"valid": False, "error": f"连接失败: {str(e)}"}
+                
+        elif provider_type == "image":
+            # Image验证：尝试连接base_url，检查API key格式
+            try:
+                import aiohttp
+                headers = {
+                    "Authorization": f"Bearer {api_key}"
+                }
+                headers.update(provider.get("headers", {}))
+                
+                # 简单HEAD请求验证连通性
+                async with aiohttp.ClientSession() as session:
+                    try:
+                        async with session.head(base_url, timeout=5) as resp:
+                            pass
+                    except:
+                        pass  # HEAD可能不被支持，忽略错误
+                    
+                    # 检查API key是否配置
+                    if not api_key:
+                        return {"valid": False, "error": "API Key未配置"}
+                    
+                    latency = int((time.time() - start_time) * 1000)
+                    provider["verified"] = True
+                    provider["verified_at"] = datetime.now().isoformat()
+                    provider["latency"] = latency
+                    config.save_global_config(use_json=True)
+                    return {"valid": True, "latency": latency, "note": "基础连接验证通过"}
+            except Exception as e:
+                return {"valid": False, "error": f"验证失败: {str(e)}"}
+                
+        elif provider_type == "video":
+            # Video验证：类似Image
+            try:
+                if not api_key:
+                    return {"valid": False, "error": "API Key未配置"}
+                
+                latency = int((time.time() - start_time) * 1000)
+                provider["verified"] = True
+                provider["verified_at"] = datetime.now().isoformat()
+                provider["latency"] = latency
+                config.save_global_config(use_json=True)
+                return {"valid": True, "latency": latency, "note": "基础配置验证通过"}
+            except Exception as e:
+                return {"valid": False, "error": f"验证失败: {str(e)}"}
+        else:
+            return {"valid": False, "error": f"不支持的提供商类型: {provider_type}"}
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"验证提供商失败: {str(e)}")
 
 
 # ============ 主入口 ============

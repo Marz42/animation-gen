@@ -41,6 +41,10 @@
           <el-icon><Histogram /></el-icon>
           <span>队列状态</span>
         </el-menu-item>
+        <el-menu-item index="/settings">
+          <el-icon><Setting /></el-icon>
+          <span>设置</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>

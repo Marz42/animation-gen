@@ -6,6 +6,7 @@ import Shots from '../views/Shots.vue'
 import Keyframes from '../views/Keyframes.vue'
 import Videos from '../views/Videos.vue'
 import Queue from '../views/Queue.vue'
+import Settings from '../views/Settings.vue'
 
 const routes = [
   { path: '/', name: 'Projects', component: Projects },
@@ -15,6 +16,7 @@ const routes = [
   { path: '/keyframes', name: 'Keyframes', component: Keyframes },
   { path: '/videos', name: 'Videos', component: Videos },
   { path: '/queue', name: 'Queue', component: Queue },
+  { path: '/settings', name: 'Settings', component: Settings },
 ]
 
 const router = createRouter({

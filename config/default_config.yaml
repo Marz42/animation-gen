@@ -64,27 +64,12 @@ defaults:
     max_polling_attempts: 60
     polling_interval: 10  # 秒
 
-# 多LLM提供商配置
+# API提供商配置（通过前端设置页面管理）
+# 新格式：providers 按类型分类，每个类型是一个APIProvider列表
 providers:
-  openai:
-    models: 
-      - "gpt-4"
-      - "gpt-4-turbo-preview"
-      - "gpt-3.5-turbo"
-  
-  anthropic:
-    base_url: "https://api.anthropic.com"
-    models:
-      - "claude-3-opus-20240229"
-      - "claude-3-sonnet-20240229"
-      - "claude-3-haiku-20240307"
-  
-  openrouter:
-    base_url: "https://openrouter.ai/api/v1"
-    models:
-      - "google/gemini-pro"
-      - "meta-llama/llama-3-70b-instruct"
-      - "anthropic/claude-3-opus"
+  llm: []      # LLM提供商列表
+  image: []    # 图片生成提供商列表
+  video: []    # 视频生成提供商列表
 
 # LLM提示词模板
 prompts:

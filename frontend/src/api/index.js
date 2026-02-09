@@ -70,4 +70,20 @@ export const promptApi = {
   update: (data) => api.put('/config/prompts', data),
 }
 
+// 配置导入/导出
+export const configApi = {
+  export: () => api.get('/config/export'),
+  import: (config) => api.post('/config/import', { config }),
+}
+
+// API提供商管理
+export const providerApi = {
+  list: () => api.get('/providers'),
+  create: (data) => api.post('/providers', data),
+  update: (id, data) => api.put(`/providers/${id}`, data),
+  delete: (id) => api.delete(`/providers/${id}`),
+  parseCurl: (curlCommand) => api.post('/providers/parse-curl', { curl_command: curlCommand }),
+  verify: (id) => api.post(`/providers/${id}/verify`),
+}
+
 export default api
