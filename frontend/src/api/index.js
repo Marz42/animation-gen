@@ -69,6 +69,9 @@ export const videoApi = {
     api.post(`/projects/${projectId}/shots/${shotId}/regenerate-keyframe-from-video`, data),
   // 获取视频提供商配置
   getProviderConfig: () => api.get('/video-provider'),
+  // 批量下载视频
+  batchDownload: (projectId, data) => 
+    api.post(`/projects/${projectId}/videos/batch-download`, data),
 }
 
 // 队列

@@ -923,6 +923,7 @@ class GenerateVideosRequest(BaseModel):
     duration: str = "4s"  # 4s/8s/12s
     size: str = "720p"  # 720p/1080p
     watermark: bool = False
+    provider: Optional[str] = None  # 指定提供商ID，不指定则使用默认
 
 
 @app.post("/api/projects/{project_id}/generate-videos")
@@ -949,26 +950,11 @@ async def generate_videos(project_id: str, request: GenerateVideosRequest):
     
     video_queue = get_queue("video")
     
-    # 从项目配置获取提供商设置
-    # 优先使用环境变量 VIDEO_PROVIDER，默认为 jiekouai
-    provider = os.getenv("VIDEO_PROVIDER", "jiekouai")
+    # 获取视频服务配置
+    video_config = _get_video_service_config(request.provider)
     
-    if provider == "mock":
-        video_config = {
-            "default": "mock",
-            "mock": {
-                "simulate_delay": 2,
-            }
-        }
-    else:
-        # 真实提供商配置 - 使用正确的 API key
-        video_config = {
-            "default": "jiekouai",
-            "jiekouai": {
-                "api_key": "sk_affBAM8S-pxy_fOTCLKwqGZMTR3uJY7C35HZKDhufHo",
-                "base_url": "https://api.jiekou.ai",
-            }
-        }
+    # 获取提供商显示名称
+    provider_name = request.provider or os.getenv("VIDEO_PROVIDER", "jiekouai")
     
     submitted_count = 0
     
@@ -1186,6 +1172,64 @@ async def check_video_status(project_id: str, shot_id: str):
             return {"shot_id": shot_id, "videos": []}
     
     raise HTTPException(status_code=404, detail="分镜不存在")
+
+
+class BatchDownloadRequest(BaseModel):
+    """批量下载视频请求"""
+    shot_ids: List[str]
+
+
+@app.post("/api/projects/{project_id}/videos/batch-download")
+async def batch_download_videos(project_id: str, request: BatchDownloadRequest):
+    """
+    批量获取视频下载链接
+    
+    返回每个shot_id对应的视频下载URL列表
+    """
+    project = project_manager.load_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    
+    shots = project_manager.load_shots(project)
+    download_list = []
+    
+    for shot in shots:
+        if shot.shot_id not in request.shot_ids:
+            continue
+        
+        batch = shot.get_current_batch()
+        if not batch or not batch.get("videos"):
+            continue
+        
+        for video in batch["videos"]:
+            # 只返回已完成的视频
+            if video.get("status") != "completed":
+                continue
+            
+            video_url = None
+            
+            # 优先使用本地路径
+            if video.get("local_path"):
+                parts = video["local_path"].split("animation_projects/")
+                if len(parts) > 1:
+                    video_url = f"/static/{parts[1]}"
+            # 其次使用远程URL
+            elif video.get("video_url"):
+                video_url = video["video_url"]
+            
+            if video_url:
+                download_list.append({
+                    "shot_id": shot.shot_id,
+                    "task_id": video.get("task_id"),
+                    "url": video_url,
+                    "filename": f"{shot.shot_id}.mp4"
+                })
+    
+    return {
+        "total": len(request.shot_ids),
+        "available": len(download_list),
+        "downloads": download_list
+    }
 
 
 # ============ 视频Prompt管理API ============
@@ -1543,6 +1587,17 @@ async def get_video_provider():
     # 获取提供商配置
     config = get_provider_config(provider_id)
     
+    # 获取用户自定义的视频提供商
+    custom_config = Config.load_global()
+    custom_providers = []
+    for provider in custom_config.providers.get("video", []):
+        custom_providers.append({
+            "id": _get_provider_id(provider),
+            "name": _get_provider_attr(provider, "name"),
+            "type": "custom",
+            "base_url": _get_provider_attr(provider, "base_url"),
+        })
+    
     return {
         "current_provider": provider_id,
         "current_config": {
@@ -1559,9 +1614,11 @@ async def get_video_provider():
                 "name": p.display_name,
                 "durations": p.duration_param.options,
                 "resolutions": p.resolution_param.options,
+                "type": "builtin",
             }
             for p in list_provider_configs()
         ],
+        "custom_providers": custom_providers,
         "api_key_configured": {
             "jiekouai": api_key_set
         }
@@ -2046,6 +2103,54 @@ def _set_provider_attr(provider, attr: str, value):
         provider[attr] = value
     else:
         setattr(provider, attr, value)
+
+
+def _get_video_service_config(provider_id: Optional[str] = None) -> dict:
+    """
+    获取视频服务配置
+    
+    Args:
+        provider_id: 提供商ID，如果为None则使用环境变量或默认配置
+    
+    Returns:
+        视频服务配置字典
+    """
+    # 如果未指定提供商，使用环境变量或默认
+    if not provider_id:
+        provider_id = os.getenv("VIDEO_PROVIDER", "jiekouai")
+    
+    # 检查是否为mock
+    if provider_id == "mock":
+        return {
+            "default": "mock",
+            "mock": {"simulate_delay": 2}
+        }
+    
+    # 尝试从配置中加载自定义提供商
+    config = Config.load_global()
+    
+    # 查找视频类型的提供商
+    for provider in config.providers.get("video", []):
+        if _get_provider_id(provider) == provider_id:
+            # 找到匹配的提供商，构建配置
+            return {
+                "default": provider_id,
+                provider_id: {
+                    "api_key": _get_provider_attr(provider, "api_key", ""),
+                    "base_url": _get_provider_attr(provider, "base_url", "https://api.jiekou.ai"),
+                    "endpoint": _get_provider_attr(provider, "endpoint"),
+                    "headers": _get_provider_attr(provider, "headers", {}),
+                }
+            }
+    
+    # 默认使用内置的jiekouai配置
+    return {
+        "default": "jiekouai",
+        "jiekouai": {
+            "api_key": os.getenv("JIEKOUAI_API_KEY", ""),
+            "base_url": "https://api.jiekou.ai",
+        }
+    }
 
 
 @app.put("/api/providers/{provider_id}")

@@ -40,6 +40,16 @@
                 <el-button type="success" size="small" @click="generateVideosForSelected">
                   生成视频
                 </el-button>
+                <el-button 
+                  type="warning" 
+                  size="small" 
+                  @click="batchDownload"
+                  :disabled="completedSelectedCount === 0"
+                  :loading="downloading"
+                >
+                  <el-icon><Download /></el-icon>
+                  批量下载 ({{ completedSelectedCount }})
+                </el-button>
                 <el-button size="small" @click="clearSelection">取消选择</el-button>
               </div>
             </template>
@@ -48,13 +58,30 @@
 
         <!-- 生成参数设置 -->
         <el-form :inline="true" :model="form" class="demo-form-inline">
-          <el-form-item label="提供商" v-if="providerConfig">
-            <el-tag type="info">{{ providerConfig.display_name || '默认' }}</el-tag>
+          <el-form-item label="提供商">
+            <el-select v-model="form.provider" style="width: 160px" :disabled="selectedShots.length === 0 && videos.length > 0">
+              <el-option-group label="内置提供商">
+                <el-option 
+                  v-for="p in availableProviders.filter(p => p.type === 'builtin')" 
+                  :key="p.id" 
+                  :label="p.name" 
+                  :value="p.id" 
+                />
+              </el-option-group>
+              <el-option-group label="自定义提供商" v-if="customProviders.length > 0">
+                <el-option 
+                  v-for="p in customProviders" 
+                  :key="p.id" 
+                  :label="p.name" 
+                  :value="p.id" 
+                />
+              </el-option-group>
+            </el-select>
           </el-form-item>
           <el-form-item label="时长">
             <el-select v-model="form.duration" style="width: 100px">
               <el-option 
-                v-for="d in providerConfig?.durations || ['4s', '8s', '12s']" 
+                v-for="d in currentProviderConfig?.durations || ['4s', '8s', '12s']" 
                 :key="d" 
                 :label="d" 
                 :value="d" 
@@ -64,7 +91,7 @@
           <el-form-item label="尺寸">
             <el-select v-model="form.size" style="width: 130px">
               <el-option 
-                v-for="s in providerConfig?.resolutions || ['720p', '1080p']" 
+                v-for="s in currentProviderConfig?.resolutions || ['720p', '1080p']" 
                 :key="s" 
                 :label="s" 
                 :value="s" 
@@ -400,7 +427,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Setting, VideoPlay, Download } from '@element-plus/icons-vue'
 import { videoApi, promptApi, shotApi } from '../api'
@@ -412,14 +439,26 @@ const loading = ref(false)
 const generating = ref(false)
 const generatingPrompt = ref(null)
 const selectedShots = ref([])
+const downloading = ref(false)
 
 // 提供商配置
 const providerConfig = ref(null)
+const availableProviders = ref([])
+const customProviders = ref([])
+const currentProviderConfig = ref(null)
 
 const form = ref({
+  provider: 'jiekouai',
   duration: '4s',
   size: '720p',
   watermark: false
+})
+
+// 计算已选中的已完成视频数量
+const completedSelectedCount = computed(() => {
+  return videos.value.filter(v => 
+    selectedShots.value.includes(v.shot_id) && v.status === 'completed'
+  ).length
 })
 
 // 加载提供商配置
@@ -427,6 +466,16 @@ const loadProviderConfig = async () => {
   try {
     const res = await videoApi.getProviderConfig()
     providerConfig.value = res.data.current_config
+    availableProviders.value = res.data.available_providers || []
+    customProviders.value = res.data.custom_providers || []
+    
+    // 设置默认提供商
+    if (res.data.current_provider) {
+      form.value.provider = res.data.current_provider
+    }
+    
+    // 设置当前提供商配置
+    currentProviderConfig.value = providerConfig.value
     
     // 设置默认值
     if (providerConfig.value) {
@@ -601,7 +650,8 @@ const generateSingleVideo = async (video) => {
       shot_ids: [video.shot_id],
       duration: form.value.duration,
       size: form.value.size,
-      watermark: form.value.watermark
+      watermark: form.value.watermark,
+      provider: form.value.provider
     })
     ElMessage.success('视频生成任务已提交')
     fetchData()
@@ -618,7 +668,8 @@ const generateAllVideos = async () => {
     await videoApi.generate(projectStore.projectId, {
       duration: form.value.duration,
       size: form.value.size,
-      watermark: form.value.watermark
+      watermark: form.value.watermark,
+      provider: form.value.provider
     })
     ElMessage.success('视频生成任务已提交')
     fetchData()
@@ -649,7 +700,8 @@ const generateVideosForSelected = async () => {
       shot_ids: selectedShots.value,
       duration: form.value.duration,
       size: form.value.size,
-      watermark: form.value.watermark
+      watermark: form.value.watermark,
+      provider: form.value.provider
     })
     ElMessage.success('视频生成任务已提交')
     clearSelection()
@@ -658,6 +710,50 @@ const generateVideosForSelected = async () => {
     ElMessage.error('提交失败')
   } finally {
     generating.value = false
+  }
+}
+
+// 批量下载
+const batchDownload = async () => {
+  if (selectedShots.value.length === 0) {
+    ElMessage.warning('请先选择分镜')
+    return
+  }
+  
+  downloading.value = true
+  try {
+    const res = await videoApi.batchDownload(projectStore.projectId, {
+      shot_ids: selectedShots.value
+    })
+    
+    const downloads = res.data.downloads || []
+    if (downloads.length === 0) {
+      ElMessage.warning('选中的分镜中没有可下载的已完成视频')
+      return
+    }
+    
+    // 依次下载每个视频
+    let successCount = 0
+    for (const item of downloads) {
+      try {
+        const link = document.createElement('a')
+        link.href = item.url
+        link.download = item.filename
+        link.target = '_blank'
+        link.click()
+        successCount++
+        // 添加小延迟避免浏览器阻塞
+        await new Promise(resolve => setTimeout(resolve, 500))
+      } catch (e) {
+        console.error(`下载 ${item.shot_id} 失败:`, e)
+      }
+    }
+    
+    ElMessage.success(`已开始下载 ${successCount} 个视频`)
+  } catch (e) {
+    ElMessage.error('批量下载失败')
+  } finally {
+    downloading.value = false
   }
 }
 
