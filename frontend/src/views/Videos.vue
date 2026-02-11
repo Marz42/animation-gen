@@ -108,20 +108,38 @@
                 <el-checkbox :model-value="isSelected(video.shot_id)" size="large" />
               </div>
               
-              <!-- 首帧图片 -->
-              <div class="keyframe-wrapper" @click="showVideoDetail(video)">
-                <img 
-                  v-if="video.keyframe_path" 
-                  :src="getImageUrl(video.keyframe_path)" 
-                  class="keyframe-image"
-                />
-                <div v-else class="no-keyframe">暂无首帧</div>
+              <!-- 视频预览区域 -->
+              <div class="media-wrapper" @click="showVideoDetail(video)">
+                <!-- 视频已完成：显示视频播放器 -->
+                <template v-if="video.status === 'completed' && (video.local_path || video.video_url)">
+                  <video 
+                    :src="getVideoUrl(video)" 
+                    class="video-player-preview"
+                    preload="metadata"
+                    muted
+                    playsinline
+                  />
+                  <div class="video-play-overlay">
+                    <el-icon :size="48" color="#fff"><VideoPlay /></el-icon>
+                  </div>
+                </template>
+                
+                <!-- 其他状态：显示首帧图片 -->
+                <template v-else>
+                  <img 
+                    v-if="video.keyframe_path" 
+                    :src="getImageUrl(video.keyframe_path)" 
+                    class="keyframe-image"
+                  />
+                  <div v-else class="no-keyframe">暂无首帧</div>
+                </template>
                 
                 <!-- 视频状态覆盖层 -->
-                <div class="video-status-overlay" v-if="getVideoStatus(video) !== 'pending'">
+                <div class="video-status-overlay" :class="getVideoStatus(video)">
                   <el-tag :type="getVideoStatusType(video)" effect="dark" size="small">
                     {{ getVideoStatusText(video) }}
                   </el-tag>
+                  <span v-if="video.status === 'completed'" class="video-duration">{{ video.duration }}</span>
                 </div>
                 
                 <!-- 进度条 -->
@@ -189,8 +207,9 @@
                 
                 <!-- 操作按钮 -->
                 <div class="video-actions">
+                  <!-- 生成按钮 -->
                   <el-button 
-                    v-if="video.keyframe_path && video.video_prompt"
+                    v-if="video.status !== 'completed' && video.status !== 'video_generating' && video.keyframe_path && video.video_prompt"
                     type="primary" 
                     size="small"
                     @click="generateSingleVideo(video)"
@@ -198,20 +217,36 @@
                   >
                     生成视频
                   </el-button>
+                  
+                  <!-- 播放按钮 -->
                   <el-button 
-                    v-if="video.status === 'completed' && video.local_path"
+                    v-if="video.status === 'completed'"
                     type="success" 
                     size="small"
                     @click="playVideo(video)"
+                    :disabled="!getVideoUrl(video)"
                   >
-                    播放
+                    <el-icon><VideoPlay /></el-icon> 播放
                   </el-button>
+                  
+                  <!-- 下载按钮 -->
                   <el-button 
-                    v-if="video.status === 'completed' && video.video_url"
+                    v-if="video.status === 'completed'"
                     size="small"
                     @click="downloadVideo(video)"
+                    :disabled="!getVideoUrl(video)"
                   >
-                    下载
+                    <el-icon><Download /></el-icon> 下载
+                  </el-button>
+                  
+                  <!-- 重新生成按钮 -->
+                  <el-button 
+                    v-if="video.status === 'completed' || video.status === 'failed'"
+                    type="warning"
+                    size="small"
+                    @click="regenerateVideo(video)"
+                  >
+                    重新生成
                   </el-button>
                 </div>
               </div>
@@ -367,7 +402,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Setting } from '@element-plus/icons-vue'
+import { Refresh, Setting, VideoPlay, Download } from '@element-plus/icons-vue'
 import { videoApi, promptApi, shotApi } from '../api'
 import { useProjectStore } from '../stores/project'
 
@@ -452,6 +487,21 @@ const getImageUrl = (path) => {
     return `http://localhost:8000/static/${parts[1]}`
   }
   return path
+}
+
+const getVideoUrl = (video) => {
+  // 优先使用本地路径
+  if (video.local_path) {
+    const parts = video.local_path.split('animation_projects/')
+    if (parts.length > 1) {
+      return `http://localhost:8000/static/${parts[1]}`
+    }
+  }
+  // 否则使用远程 URL
+  if (video.video_url) {
+    return video.video_url
+  }
+  return ''
 }
 
 const getVideoStatus = (video) => {
@@ -776,11 +826,9 @@ const saveVideoPromptTemplate = async () => {
 
 // 视频播放和下载
 const playVideo = (video) => {
-  if (video.local_path) {
-    playerDialog.value.videoUrl = getImageUrl(video.local_path)
-    playerDialog.value.visible = true
-  } else if (video.video_url) {
-    playerDialog.value.videoUrl = video.video_url
+  const url = getVideoUrl(video)
+  if (url) {
+    playerDialog.value.videoUrl = url
     playerDialog.value.visible = true
   } else {
     ElMessage.warning('视频暂不可用')
@@ -788,10 +836,43 @@ const playVideo = (video) => {
 }
 
 const downloadVideo = (video) => {
-  if (video.video_url) {
-    window.open(video.video_url, '_blank')
+  const url = getVideoUrl(video)
+  if (url) {
+    // 创建一个临时链接来下载
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${video.shot_id}.mp4`
+    link.target = '_blank'
+    link.click()
   } else {
     ElMessage.warning('视频链接不可用')
+  }
+}
+
+// 重新生成视频
+const regenerateVideo = async (video) => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要重新生成这个视频吗？之前的视频将被替换。',
+      '确认重新生成',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+    
+    generating.value = video.shot_id
+    await videoApi.generate(projectStore.projectId, {
+      shot_ids: [video.shot_id],
+      duration: form.value.duration,
+      size: form.value.size,
+      watermark: form.value.watermark
+    })
+    ElMessage.success('重新生成任务已提交')
+    fetchData()
+  } catch (e) {
+    if (e !== 'cancel') {
+      ElMessage.error('提交失败')
+    }
+  } finally {
+    generating.value = false
   }
 }
 
@@ -864,6 +945,17 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
+.media-wrapper {
+  height: 200px;
+  background: #f5f5f5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+  cursor: pointer;
+}
+
 .keyframe-wrapper {
   height: 200px;
   background: #f5f5f5;
@@ -881,6 +973,30 @@ onUnmounted(() => {
   object-fit: cover;
 }
 
+.video-player-preview {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.video-play-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.media-wrapper:hover .video-play-overlay {
+  opacity: 1;
+}
+
 .no-keyframe {
   color: #999;
   font-size: 14px;
@@ -890,6 +1006,23 @@ onUnmounted(() => {
   position: absolute;
   top: 10px;
   right: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+}
+
+.video-status-overlay.completed {
+  top: auto;
+  bottom: 10px;
+}
+
+.video-duration {
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
 }
 
 .progress-overlay {
