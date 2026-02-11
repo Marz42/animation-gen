@@ -67,6 +67,8 @@ export const videoApi = {
   // 从视频页面重新生成首帧
   regenerateKeyframe: (projectId, shotId, data = {}) => 
     api.post(`/projects/${projectId}/shots/${shotId}/regenerate-keyframe-from-video`, data),
+  // 获取视频提供商配置
+  getProviderConfig: () => api.get('/video-provider'),
 }
 
 // 队列

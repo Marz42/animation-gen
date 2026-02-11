@@ -48,17 +48,27 @@
 
         <!-- 生成参数设置 -->
         <el-form :inline="true" :model="form" class="demo-form-inline">
+          <el-form-item label="提供商" v-if="providerConfig">
+            <el-tag type="info">{{ providerConfig.display_name || '默认' }}</el-tag>
+          </el-form-item>
           <el-form-item label="时长">
             <el-select v-model="form.duration" style="width: 100px">
-              <el-option label="4s" value="4s" />
-              <el-option label="8s" value="8s" />
-              <el-option label="12s" value="12s" />
+              <el-option 
+                v-for="d in providerConfig?.durations || ['4s', '8s', '12s']" 
+                :key="d" 
+                :label="d" 
+                :value="d" 
+              />
             </el-select>
           </el-form-item>
           <el-form-item label="尺寸">
             <el-select v-model="form.size" style="width: 130px">
-              <el-option label="720p" value="720p" />
-              <el-option label="1080p" value="1080p" />
+              <el-option 
+                v-for="s in providerConfig?.resolutions || ['720p', '1080p']" 
+                :key="s" 
+                :label="s" 
+                :value="s" 
+              />
             </el-select>
           </el-form-item>
           <el-form-item label="水印">
@@ -368,11 +378,30 @@ const generating = ref(false)
 const generatingPrompt = ref(null)
 const selectedShots = ref([])
 
+// 提供商配置
+const providerConfig = ref(null)
+
 const form = ref({
   duration: '4s',
   size: '720p',
   watermark: false
 })
+
+// 加载提供商配置
+const loadProviderConfig = async () => {
+  try {
+    const res = await videoApi.getProviderConfig()
+    providerConfig.value = res.data.current_config
+    
+    // 设置默认值
+    if (providerConfig.value) {
+      form.value.duration = providerConfig.value.default_duration || '4s'
+      form.value.size = providerConfig.value.default_resolution || '720p'
+    }
+  } catch (e) {
+    console.error('加载提供商配置失败:', e)
+  }
+}
 
 // 对话框状态
 const playerDialog = ref({
@@ -774,6 +803,7 @@ const showVideoDetail = (video) => {
 }
 
 onMounted(() => {
+  loadProviderConfig()
   fetchData()
   timer = setInterval(fetchData, 10000)
 })

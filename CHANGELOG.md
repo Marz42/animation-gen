@@ -12,6 +12,19 @@
 - ✅ 更新前端选择器和默认值
 - ✅ 更新 mock provider 能力声明
 
+#### 视频状态自动轮询机制
+- ✅ 新增 VideoMonitorService 后台服务
+- ✅ 自动轮询 submitted/processing 状态的视频
+- ✅ 完成时自动下载视频到项目目录
+- ✅ 在应用启动时自动启动，关闭时自动停止
+
+#### 多提供商参数适配系统
+- ✅ 新增 ProviderConfig 配置管理系统
+- ✅ 支持不同提供商的参数映射 (duration/resolution)
+- ✅ 预定义配置: 接口AI Sora-2 (4s/8s/12s), 可灵 (5s/10s), Runway (4s/10s)
+- ✅ 前端动态显示提供商支持的参数选项
+- ✅ API 端点 `/api/video-provider` 返回详细配置信息
+
 ### 新增功能
 
 #### API提供商管理

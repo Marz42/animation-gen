@@ -23,14 +23,15 @@ class JiekouaiVideoProvider(BaseVideoProvider):
         super().__init__(config)
     
     def get_capabilities(self) -> Dict[str, Any]:
+        from .config import JIEKOUAI_SORA2_CONFIG
         return {
             "supports_image_input": True,
-            "image_format": "base64",  # 只支持 base64
-            "durations": ["4s", "8s", "12s"],
-            "resolutions": ["720p", "1080p"],
+            "image_format": "base64",
+            "durations": JIEKOUAI_SORA2_CONFIG.duration_param.options,
+            "resolutions": JIEKOUAI_SORA2_CONFIG.resolution_param.options,
             "max_prompt_length": 2000,
             "supports_watermark": False,
-            "requires_upload": False,  # 可以直接传 base64
+            "requires_upload": False,
             "async_only": True,
         }
     

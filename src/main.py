@@ -39,6 +39,7 @@ from src.services.llm_service import LLMService
 from src.services.image_service import ImageService
 from src.services.video import VideoService
 from src.services.shot_design_service import ShotDesignService
+from src.services.video_monitor import get_video_monitor
 
 
 # 全局实例
@@ -60,6 +61,10 @@ async def lifespan(app: FastAPI):
     await image_queue.start()
     await video_queue.start()
     
+    # 启动视频状态监控服务
+    video_monitor = get_video_monitor()
+    await video_monitor.start()
+    
     # 恢复僵尸任务
     for project in project_manager.list_projects():
         recovered = project_manager.recover_zombie_tasks(project, timeout_seconds=300)
@@ -70,6 +75,11 @@ async def lifespan(app: FastAPI):
     
     # 关闭时
     print("🛑 关闭动画生成系统...")
+    
+    # 停止视频状态监控服务
+    video_monitor = get_video_monitor()
+    await video_monitor.stop()
+    
     await shutdown_all_queues()
 
 
@@ -1525,12 +1535,33 @@ async def get_queue_status():
 @app.get("/api/video-provider")
 async def get_video_provider():
     """获取当前视频提供商配置"""
-    provider = os.getenv("VIDEO_PROVIDER", "jiekouai")
+    from src.services.video.providers.config import get_provider_config, list_provider_configs
+    
+    provider_id = os.getenv("VIDEO_PROVIDER", "jiekouai")
     api_key_set = bool(os.getenv("JIEKOUAI_API_KEY"))
     
+    # 获取提供商配置
+    config = get_provider_config(provider_id)
+    
     return {
-        "current_provider": provider,
-        "available_providers": ["jiekouai", "mock"],
+        "current_provider": provider_id,
+        "current_config": {
+            "display_name": config.display_name,
+            "durations": config.duration_param.options,
+            "resolutions": config.resolution_param.options,
+            "default_duration": config.duration_param.default,
+            "default_resolution": config.resolution_param.default,
+            "capabilities": config.capabilities,
+        },
+        "available_providers": [
+            {
+                "id": p.provider_id,
+                "name": p.display_name,
+                "durations": p.duration_param.options,
+                "resolutions": p.resolution_param.options,
+            }
+            for p in list_provider_configs()
+        ],
         "api_key_configured": {
             "jiekouai": api_key_set
         }
