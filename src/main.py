@@ -998,7 +998,8 @@ async def generate_videos(project_id: str, request: GenerateVideosRequest):
                         "duration": request.duration,
                         "size": request.size,
                         "prompt": p,
-                        "provider": result.provider_info.get("provider", "jiekouai"),
+                        "provider": provider_name,  # 保存用户选择的提供商ID
+                        "provider_impl": result.provider_info.get("provider", "jiekouai"),  # 实际使用的实现
                         "created_at": datetime.now().isoformat()
                     }
                     b["videos"].append(video_info)
@@ -2109,6 +2110,11 @@ def _get_video_service_config(provider_id: Optional[str] = None) -> dict:
     """
     获取视频服务配置
     
+    支持三种模式：
+    1. mock: 模拟提供商
+    2. jiekouai: 接口AI内置提供商
+    3. generic: 通用提供商（通过 request_template 配置）
+    
     Args:
         provider_id: 提供商ID，如果为None则使用环境变量或默认配置
     
@@ -2132,11 +2138,29 @@ def _get_video_service_config(provider_id: Optional[str] = None) -> dict:
     # 查找视频类型的提供商
     for provider in config.providers.get("video", []):
         if _get_provider_id(provider) == provider_id:
-            # 找到匹配的提供商，构建配置
+            # 检查是否有 request_template，有则使用通用提供商
+            custom_fields = _get_provider_attr(provider, "custom_fields", {})
+            request_template = custom_fields.get("request_template")
+            
+            if request_template:
+                # 使用通用提供商
+                return {
+                    "default": "generic",
+                    "generic": {
+                        "api_key": _get_provider_attr(provider, "api_key", ""),
+                        "base_url": _get_provider_attr(provider, "base_url", ""),
+                        "request_template": request_template,
+                        "parameter_mapping": custom_fields.get("parameter_mapping", {}),
+                        "response_parser": custom_fields.get("response_parser", {}),
+                        "status_query": custom_fields.get("status_query", {}),
+                    }
+                }
+            
+            # 否则使用 jiekouai 作为实现（接口AI兼容）
             return {
-                "default": provider_id,
-                provider_id: {
-                    "api_key": _get_provider_attr(provider, "api_key", ""),
+                "default": "jiekouai",
+                "jiekouai": {
+                    "api_key": _get_provider_attr(provider, "api_key", "") or os.getenv("JIEKOUAI_API_KEY", ""),
                     "base_url": _get_provider_attr(provider, "base_url", "https://api.jiekou.ai"),
                     "endpoint": _get_provider_attr(provider, "endpoint"),
                     "headers": _get_provider_attr(provider, "headers", {}),

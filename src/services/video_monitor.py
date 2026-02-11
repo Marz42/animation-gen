@@ -17,6 +17,20 @@ from src.core.config import Config
 project_manager = ProjectManager()
 
 
+def _get_provider_id(provider) -> str:
+    """获取提供商ID（支持字典和APIProvider对象）"""
+    if isinstance(provider, dict):
+        return provider.get("id")
+    return getattr(provider, "id", None)
+
+
+def _get_provider_attr(provider, attr: str, default=None):
+    """获取提供商属性（支持字典和APIProvider对象）"""
+    if isinstance(provider, dict):
+        return provider.get(attr, default)
+    return getattr(provider, attr, default)
+
+
 class VideoMonitorService:
     """视频状态监控服务"""
     
@@ -137,22 +151,58 @@ class VideoMonitorService:
         
         return self._video_service_cache[provider]
     
-    def _get_video_config(self, provider: str) -> dict:
+    def _get_video_config(self, provider_id: str) -> dict:
         """获取视频服务配置"""
-        if provider == "mock":
+        # 检查是否为mock
+        if provider_id == "mock":
             return {
                 "default": "mock",
                 "mock": {"simulate_delay": 2}
             }
-        else:
-            # 真实提供商配置
-            return {
-                "default": "jiekouai",
-                "jiekouai": {
-                    "api_key": os.getenv("JIEKOUAI_API_KEY", ""),
-                    "base_url": "https://api.jiekou.ai",
+        
+        # 尝试从配置中加载自定义提供商
+        config = Config.load_global()
+        
+        # 查找视频类型的提供商
+        for provider in config.providers.get("video", []):
+            if _get_provider_id(provider) == provider_id:
+                # 检查是否有 request_template，有则使用通用提供商
+                custom_fields = _get_provider_attr(provider, "custom_fields", {})
+                request_template = custom_fields.get("request_template")
+                
+                if request_template:
+                    # 使用通用提供商
+                    return {
+                        "default": "generic",
+                        "generic": {
+                            "api_key": _get_provider_attr(provider, "api_key", ""),
+                            "base_url": _get_provider_attr(provider, "base_url", ""),
+                            "request_template": request_template,
+                            "parameter_mapping": custom_fields.get("parameter_mapping", {}),
+                            "response_parser": custom_fields.get("response_parser", {}),
+                            "status_query": custom_fields.get("status_query", {}),
+                        }
+                    }
+                
+                # 否则使用 jiekouai 配置
+                return {
+                    "default": "jiekouai",
+                    "jiekouai": {
+                        "api_key": _get_provider_attr(provider, "api_key", "") or os.getenv("JIEKOUAI_API_KEY", ""),
+                        "base_url": _get_provider_attr(provider, "base_url", "https://api.jiekou.ai"),
+                        "endpoint": _get_provider_attr(provider, "endpoint"),
+                        "headers": _get_provider_attr(provider, "headers", {}),
+                    }
                 }
+        
+        # 默认使用内置的jiekouai配置
+        return {
+            "default": "jiekouai",
+            "jiekouai": {
+                "api_key": os.getenv("JIEKOUAI_API_KEY", ""),
+                "base_url": "https://api.jiekou.ai",
             }
+        }
     
     async def _download_video(self, project, shot, video, video_url, video_service):
         """下载完成的视频"""
