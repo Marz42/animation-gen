@@ -50,14 +50,15 @@
         <el-form :inline="true" :model="form" class="demo-form-inline">
           <el-form-item label="时长">
             <el-select v-model="form.duration" style="width: 100px">
-              <el-option label="5s" value="5s" />
-              <el-option label="10s" value="10s" />
+              <el-option label="4s" value="4s" />
+              <el-option label="8s" value="8s" />
+              <el-option label="12s" value="12s" />
             </el-select>
           </el-form-item>
           <el-form-item label="尺寸">
             <el-select v-model="form.size" style="width: 130px">
-              <el-option label="竖屏 720x1280" value="720x1280" />
-              <el-option label="横屏 1280x720" value="1280x720" />
+              <el-option label="720p" value="720p" />
+              <el-option label="1080p" value="1080p" />
             </el-select>
           </el-form-item>
           <el-form-item label="水印">
@@ -368,8 +369,8 @@ const generatingPrompt = ref(null)
 const selectedShots = ref([])
 
 const form = ref({
-  duration: '5s',
-  size: '1280x720',
+  duration: '4s',
+  size: '720p',
   watermark: false
 })
 

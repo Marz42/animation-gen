@@ -17,23 +17,24 @@ class VideoProviderType(str, Enum):
 
 
 class VideoDuration(str, Enum):
-    """标准化时长"""
-    SECONDS_5 = "5s"
-    SECONDS_10 = "10s"
+    """标准化时长 (接口AI Sora-2 支持: 4s, 8s, 12s)"""
+    SECONDS_4 = "4s"
+    SECONDS_8 = "8s"
+    SECONDS_12 = "12s"
 
 
 class VideoResolution(str, Enum):
-    """标准化分辨率"""
-    PORTRAIT_720P = "720x1280"   # 竖屏
-    LANDSCAPE_720P = "1280x720"  # 横屏
+    """标准化分辨率 (接口AI Sora-2 支持: 720p, 1080p)"""
+    P720 = "720p"
+    P1080 = "1080p"
 
 
 class VideoGenerationRequest(BaseModel):
     """统一请求格式"""
     prompt: str
     image_path: Optional[str] = None
-    duration: VideoDuration = VideoDuration.SECONDS_5
-    resolution: VideoResolution = VideoResolution.LANDSCAPE_720P
+    duration: VideoDuration = VideoDuration.SECONDS_4
+    resolution: VideoResolution = VideoResolution.P720
     watermark: bool = False
     # 提供商特定参数
     provider_params: Dict[str, Any] = Field(default_factory=dict)

@@ -908,10 +908,10 @@ async def estimate_cost(project_id: str):
 # ============ 视频生成API ============
 
 class GenerateVideosRequest(BaseModel):
-    """视频生成请求"""
+    """视频生成请求 (接口AI Sora-2 支持: duration=[4s,8s,12s], size=[720p,1080p])"""
     shot_ids: Optional[List[str]] = None  # 如果为空，生成所有已审核首帧的分镜
-    duration: str = "5s"  # 4s/5s/6s/8s/10s
-    size: str = "512x512"  # 480x480/512x512/720x480/1280x720
+    duration: str = "4s"  # 4s/8s/12s
+    size: str = "720p"  # 720p/1080p
     watermark: bool = False
 
 

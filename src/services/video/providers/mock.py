@@ -28,8 +28,8 @@ class MockVideoProvider(BaseVideoProvider):
         return {
             "supports_image_input": True,
             "image_format": "url_or_path",
-            "durations": ["5s", "10s"],
-            "resolutions": ["720x1280", "1280x720"],
+            "durations": ["4s", "8s", "12s"],
+            "resolutions": ["720p", "1080p"],
             "max_prompt_length": 2000,
             "supports_watermark": True,
             "requires_upload": False,

@@ -25,7 +25,7 @@ class JiekouaiVideoProvider(BaseVideoProvider):
     def get_capabilities(self) -> Dict[str, Any]:
         return {
             "supports_image_input": True,
-            "image_format": "base64_or_url",  # 支持 base64
+            "image_format": "base64",  # 只支持 base64
             "durations": ["4s", "8s", "12s"],
             "resolutions": ["720p", "1080p"],
             "max_prompt_length": 2000,
@@ -46,16 +46,23 @@ class JiekouaiVideoProvider(BaseVideoProvider):
             return base64.b64encode(f.read()).decode('utf-8')
     
     def _normalize_duration(self, duration: VideoDuration) -> int:
-        """转换时长"""
-        # 接口AI支持 4, 8, 12 秒
-        if duration == VideoDuration.SECONDS_5:
-            return 4
-        return 4  # 默认4秒
+        """转换时长到 API 要求的整数值"""
+        # 接口AI Sora-2 支持: 4, 8, 12 秒
+        duration_map = {
+            VideoDuration.SECONDS_4: 4,
+            VideoDuration.SECONDS_8: 8,
+            VideoDuration.SECONDS_12: 12,
+        }
+        return duration_map.get(duration, 4)  # 默认4秒
     
     def _normalize_resolution(self, resolution: VideoResolution) -> str:
-        """转换分辨率"""
-        # 接口AI支持 720p, 1080p
-        return "720p"  # 默认720p
+        """转换分辨率到 API 要求的格式"""
+        # 接口AI Sora-2 支持: 720p, 1080p
+        resolution_map = {
+            VideoResolution.P720: "720p",
+            VideoResolution.P1080: "1080p",
+        }
+        return resolution_map.get(resolution, "720p")  # 默认720p
     
     async def generate_video(
         self, 

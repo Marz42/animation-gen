@@ -53,23 +53,23 @@ class VideoService:
     def _normalize_duration(self, duration: str) -> VideoDuration:
         """标准化时长"""
         duration_map = {
-            "4s": VideoDuration.SECONDS_5,
-            "5s": VideoDuration.SECONDS_5,
-            "6s": VideoDuration.SECONDS_5,
-            "8s": VideoDuration.SECONDS_10,
-            "10s": VideoDuration.SECONDS_10,
+            "4s": VideoDuration.SECONDS_4,
+            "8s": VideoDuration.SECONDS_8,
+            "12s": VideoDuration.SECONDS_12,
         }
-        return duration_map.get(duration, VideoDuration.SECONDS_5)
+        return duration_map.get(duration, VideoDuration.SECONDS_4)
     
     def _normalize_resolution(self, size: str) -> VideoResolution:
         """标准化分辨率"""
-        # 根据宽高比判断
-        if "x" in size:
-            w, h = size.split("x")
-            width, height = int(w), int(h)
-            if height > width:
-                return VideoResolution.PORTRAIT_720P
-        return VideoResolution.LANDSCAPE_720P
+        # 直接映射到 API 支持的格式
+        resolution_map = {
+            "720p": VideoResolution.P720,
+            "1080p": VideoResolution.P1080,
+            # 兼容旧格式
+            "1280x720": VideoResolution.P720,
+            "1920x1080": VideoResolution.P1080,
+        }
+        return resolution_map.get(size, VideoResolution.P720)
     
     def get_capabilities(self, provider: Optional[str] = None) -> Dict[str, Any]:
         """获取提供商能力"""

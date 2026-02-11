@@ -1,6 +1,16 @@
 # 更新日志 (Changelog)
 
-## [Unreleased] - 2026-02-10
+## [Unreleased] - 2026-02-11
+
+### 修复 (基础功能)
+
+#### 视频生成参数修复
+- ✅ 修复 duration 参数: 从 [5s, 10s] 改为 API 要求的 [4s, 8s, 12s]
+- ✅ 修复 size 参数: 从 [720x1280, 1280x720] 改为 API 要求的 [720p, 1080p]
+- ✅ 更新 VideoDuration 枚举: SECONDS_4, SECONDS_8, SECONDS_12
+- ✅ 更新 VideoResolution 枚举: P720, P1080
+- ✅ 更新前端选择器和默认值
+- ✅ 更新 mock provider 能力声明
 
 ### 新增功能
 
