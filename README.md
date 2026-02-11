@@ -52,6 +52,16 @@
 - 多提供商支持（接口AI、Mock模式）
 - 自动视频下载
 - 状态轮询/回调支持
+- **首帧图片预览**
+- **视频Prompt自动生成（基于剧本+首帧）**
+- **分镜多选批量生成**
+- **首帧Prompt编辑和重新生成**
+
+### 7. API提供商管理
+- 内置API提供商（LLM/图片/视频）
+- 自定义提供商配置（CURL导入）
+- 提供商验证和状态监控
+- 默认提供商设置
 
 ## 项目结构
 
@@ -143,17 +153,35 @@ POST   /api/projects/{id}/shots/{id}/regenerate-keyframe # 重新生成首帧
 ### 视频API
 ```
 POST   /api/projects/{id}/generate-videos            # 生成视频
-GET    /api/projects/{id}/videos                     # 视频列表
+GET    /api/projects/{id}/videos                     # 视频列表（包含首帧路径）
 POST   /api/projects/{id}/videos/{id}/check-status   # 检查状态
+POST   /api/projects/{id}/shots/{id}/generate-video-prompt    # 生成视频Prompt
+GET    /api/projects/{id}/shots/{id}/video-prompt              # 获取视频Prompt
+POST   /api/projects/{id}/shots/{id}/video-prompt              # 保存视频Prompt
+POST   /api/projects/{id}/shots/{id}/regenerate-keyframe-from-video  # 从视频页重新生成首帧
 ```
 
-### 提示词配置API
+### API提供商API
+```
+GET    /api/providers                     # 获取所有提供商（包含内置）
+POST   /api/providers                     # 创建提供商
+PUT    /api/providers/{id}                # 更新提供商
+DELETE /api/providers/{id}                # 删除提供商
+POST   /api/providers/{id}/verify         # 验证提供商连通性
+POST   /api/providers/{id}/set-default    # 设为默认提供商
+POST   /api/providers/parse-curl          # 解析CURL命令导入配置
+GET    /api/providers/default/{type}      # 获取默认提供商
+```
+
+### 配置API
 ```
 GET    /api/config/prompts           # 获取提示词配置
 PUT    /api/config/prompts           # 更新提示词配置
+POST   /api/config/export            # 导出配置
+POST   /api/config/import            # 导入配置
 ```
 
-### 提供商配置API
+
 ```
 GET    /api/video-provider           # 获取当前视频提供商
 POST   /api/video-provider           # 切换视频提供商
@@ -254,9 +282,14 @@ cp .env.example .env
    - 可编辑图片/视频提示词（全局）
 
 6. **视频生成**
-   - 首帧审核通过后生成视频
-   - 查看视频生成进度
-   - 视频自动下载到项目目录
+   - 首帧审核通过后进入视频生成页面
+   - **显示首帧图片预览**，方便确认内容
+   - **自动生成视频Prompt**：系统调用LLM基于剧本场景+首帧Prompt生成
+   - 可编辑视频Prompt模板，自定义生成规则
+   - **多选分镜**：勾选需要生成的分镜（单条或批量）
+   - 支持编辑首帧Prompt并重新生成（会重置视频状态）
+   - 设置视频参数（时长、尺寸、水印）
+   - 查看视频生成进度，自动下载到项目目录
 
 ## 技术要点
 
@@ -283,6 +316,21 @@ ratio = 0.9 → 0.3 (逐步缩小)
 - 全局配置存储
 - 支持热更新
 - 各阶段独立配置
+- 视频Prompt自动生成（基于模板）
+
+### 5. 内置API提供商
+- 从环境变量读取API密钥
+- 动态生成配置（不写入配置文件）
+- 支持验证但不保存状态
+- 用户自定义提供商可覆盖
+
+### 6. 视频Prompt生成
+基于模板调用LLM生成：
+```
+输入：剧本场景描述 + 首帧图片Prompt + 角色信息
+输出：视频描述（动作、相机运动、光影）
+```
+支持占位符：[[SCENE_DESCRIPTION]], [[IMAGE_PROMPT]], [[CHARACTERS]], [[ACTION]], [[CAMERA_MOVEMENT]], [[DURATION]]
 
 ## 已知问题
 
@@ -294,14 +342,12 @@ ratio = 0.9 → 0.3 (逐步缩小)
    - 不同视频提供商支持不同时长
    - 当前统一使用4s/5s/6s/8s/10s
 
-3. **Session泄漏**
-   - 已修复：ImageService.close()同时关闭jiekouai_service
-
 ## 未来计划
 
 ### 短期 (v1.1)
+- [x] 批量操作优化 ✅
+- [x] API提供商管理 ✅
 - [ ] 视频状态查询端点修复
-- [ ] 批量操作优化
 - [ ] UI/UX改进（加载状态、错误提示）
 - [ ] 项目导出功能（视频合并）
 

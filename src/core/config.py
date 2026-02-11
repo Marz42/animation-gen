@@ -42,7 +42,7 @@ class GenerationConfig(BaseModel):
     resolution: str = "1280x720"
     frame_rate: int = 24
     character_ref_resolution: str = "512x512"
-    scene_ref_resolution: str = "768x432"
+    scene_ref_resolution: str = "512x512"
     keyframe_resolution: str = "1280x720"
 
 
@@ -68,6 +68,7 @@ class APIProvider(BaseModel):
     name: str
     type: str  # "llm" | "image" | "video"
     enabled: bool = True
+    is_default: bool = False  # 是否为默认提供商
     base_url: str
     api_key: Optional[str] = None
     model: Optional[str] = None

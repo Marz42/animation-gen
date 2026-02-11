@@ -1032,7 +1032,7 @@ async def generate_videos(project_id: str, request: GenerateVideosRequest):
 
 @app.get("/api/projects/{project_id}/videos")
 async def get_videos(project_id: str):
-    """获取项目所有视频生成状态"""
+    """获取项目所有视频生成状态（包含首帧图片路径）"""
     project = project_manager.load_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -1042,13 +1042,43 @@ async def get_videos(project_id: str):
     
     for shot in shots:
         batch = shot.get_current_batch()
-        if batch and batch.get("videos"):
-            for video in batch["videos"]:
+        if batch:
+            # 获取首帧图片路径
+            keyframe_path = None
+            if batch.get("keyframe"):
+                keyframe_path = batch["keyframe"].get("path")
+            
+            # 获取视频列表
+            shot_videos = batch.get("videos", [])
+            
+            # 构建基础信息
+            base_info = {
+                "shot_id": shot.shot_id,
+                "sequence": shot.sequence,
+                "scene_id": shot.scene_id,
+                "keyframe_path": keyframe_path,
+                "status": shot.status,
+                "image_prompt": shot.image_prompt.dict() if shot.image_prompt else None,
+                "video_prompt": shot.video_prompt.dict() if shot.video_prompt else None,
+            }
+            
+            if shot_videos:
+                for video in shot_videos:
+                    videos.append({
+                        **base_info,
+                        **video
+                    })
+            else:
+                # 即使没有视频，也返回分镜信息（用于待生成状态）
                 videos.append({
-                    "shot_id": shot.shot_id,
-                    "sequence": shot.sequence,
-                    "scene_id": shot.scene_id,
-                    **video
+                    **base_info,
+                    "task_id": None,
+                    "status": "pending",
+                    "duration": None,
+                    "size": None,
+                    "prompt": None,
+                    "provider": None,
+                    "created_at": None
                 })
     
     return videos
@@ -1144,6 +1174,302 @@ async def check_video_status(project_id: str, shot_id: str):
                     await video_service.close()
             
             return {"shot_id": shot_id, "videos": []}
+    
+    raise HTTPException(status_code=404, detail="分镜不存在")
+
+
+# ============ 视频Prompt管理API ============
+
+class GenerateVideoPromptRequest(BaseModel):
+    """生成视频Prompt请求"""
+    use_template: bool = True  # 是否使用模板生成
+
+
+class VideoPromptResponse(BaseModel):
+    """视频Prompt响应"""
+    description: str
+    camera: Optional[str] = None
+
+
+@app.post("/api/projects/{project_id}/shots/{shot_id}/generate-video-prompt")
+async def generate_video_prompt_endpoint(project_id: str, shot_id: str, request: GenerateVideoPromptRequest):
+    """
+    基于剧本场景片段和首帧提示词生成视频Prompt
+    """
+    project = project_manager.load_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    
+    shots = project_manager.load_shots(project)
+    characters = project_manager.load_characters(project)
+    scenes = project_manager.load_scenes(project)
+    
+    for shot in shots:
+        if shot.shot_id == shot_id:
+            # 获取场景信息
+            scene = next((s for s in scenes if s.scene_id == shot.scene_id), None)
+            if not scene:
+                raise HTTPException(status_code=404, detail="场景不存在")
+            
+            # 获取角色信息
+            shot_characters = [c for c in characters if c.character_id in shot.characters]
+            
+            # 获取首帧提示词
+            image_prompt_text = ""
+            if shot.image_prompt:
+                image_prompt_text = shot.image_prompt.positive
+            
+            # 获取剧本片段（场景描述）
+            scene_description = scene.description or ""
+            
+            # 加载配置和Prompt模板
+            config = Config.load_global()
+            prompt_template = config.prompts.get("video_prompt", "")
+            
+            if not prompt_template or not request.use_template:
+                # 使用默认模板
+                prompt_template = """基于以下信息生成视频生成提示词：
+
+剧本场景描述：
+[[SCENE_DESCRIPTION]]
+
+首帧图片提示词：
+[[IMAGE_PROMPT]]
+
+角色信息：
+[[CHARACTERS]]
+
+分镜动作描述：[[ACTION]]
+镜头运动：[[CAMERA_MOVEMENT]]
+持续时间：[[DURATION]]
+
+请生成一个详细的视频描述，包含：
+1. 画面主体的动作描述
+2. 相机运动方式
+3. 光影变化（如果有）
+
+只输出视频描述文本，不要解释。"""
+            
+            # 构建上下文
+            characters_desc = "\n".join([f"- {c.name}: {c.description}" for c in shot_characters]) if shot_characters else "无"
+            
+            # 替换模板变量
+            filled_prompt = prompt_template
+            filled_prompt = filled_prompt.replace("[[SCENE_DESCRIPTION]]", scene_description)
+            filled_prompt = filled_prompt.replace("[[IMAGE_PROMPT]]", image_prompt_text)
+            filled_prompt = filled_prompt.replace("[[CHARACTERS]]", characters_desc)
+            filled_prompt = filled_prompt.replace("[[ACTION]]", shot.action or "无")
+            filled_prompt = filled_prompt.replace("[[CAMERA_MOVEMENT]]", shot.camera_movement.value if shot.camera_movement else "static")
+            filled_prompt = filled_prompt.replace("[[DURATION]]", shot.duration.value if shot.duration else "5s")
+            
+            # 调用LLM生成视频Prompt
+            try:
+                llm_service = LLMService()
+                response = await llm_service.generate(filled_prompt)
+                
+                # 解析响应
+                description = response.strip()
+                camera = shot.camera_movement.value if shot.camera_movement else "static"
+                
+                # 保存到shot
+                from src.models.schemas import VideoPrompt
+                shot.video_prompt = VideoPrompt(
+                    description=description,
+                    camera=camera
+                )
+                project_manager.save_shots(project, shots)
+                
+                return {
+                    "status": "generated",
+                    "video_prompt": {
+                        "description": description,
+                        "camera": camera
+                    }
+                }
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"生成视频Prompt失败: {str(e)}")
+    
+    raise HTTPException(status_code=404, detail="分镜不存在")
+
+
+class UpdateVideoPromptRequest(BaseModel):
+    """更新视频Prompt请求"""
+    description: str
+    camera: Optional[str] = None
+
+
+@app.post("/api/projects/{project_id}/shots/{shot_id}/video-prompt")
+async def update_video_prompt(project_id: str, shot_id: str, request: UpdateVideoPromptRequest):
+    """保存视频Prompt到分镜"""
+    project = project_manager.load_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    
+    shots = project_manager.load_shots(project)
+    
+    for shot in shots:
+        if shot.shot_id == shot_id:
+            from src.models.schemas import VideoPrompt
+            shot.video_prompt = VideoPrompt(
+                description=request.description,
+                camera=request.camera or (shot.camera_movement.value if shot.camera_movement else "static")
+            )
+            project_manager.save_shots(project, shots)
+            
+            return {
+                "status": "updated",
+                "video_prompt": shot.video_prompt.dict()
+            }
+    
+    raise HTTPException(status_code=404, detail="分镜不存在")
+
+
+@app.get("/api/projects/{project_id}/shots/{shot_id}/video-prompt")
+async def get_video_prompt(project_id: str, shot_id: str):
+    """获取分镜的视频Prompt"""
+    project = project_manager.load_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    
+    shots = project_manager.load_shots(project)
+    
+    for shot in shots:
+        if shot.shot_id == shot_id:
+            if shot.video_prompt:
+                return {
+                    "status": "exists",
+                    "video_prompt": shot.video_prompt.dict()
+                }
+            else:
+                return {
+                    "status": "not_found",
+                    "video_prompt": None
+                }
+    
+    raise HTTPException(status_code=404, detail="分镜不存在")
+
+
+# ============ 首帧重新生成API（视频页面用） ============
+
+class RegenerateKeyframeRequest(BaseModel):
+    """重新生成首帧请求"""
+    positive_prompt: Optional[str] = None
+    negative_prompt: Optional[str] = None
+    seed: Optional[int] = None
+
+
+@app.post("/api/projects/{project_id}/shots/{shot_id}/regenerate-keyframe-from-video")
+async def regenerate_keyframe_from_video(project_id: str, shot_id: str, request: RegenerateKeyframeRequest):
+    """
+    从视频生成页面重新生成首帧
+    这会重置该分镜的视频状态，并触发首帧重新生成
+    """
+    project = project_manager.load_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    
+    shots = project_manager.load_shots(project)
+    
+    for shot in shots:
+        if shot.shot_id == shot_id:
+            batch = shot.get_current_batch()
+            if not batch:
+                raise HTTPException(status_code=400, detail="当前分镜没有batch，无法重新生成")
+            
+            # 更新提示词（如果提供了）
+            if request.positive_prompt is not None or request.negative_prompt is not None:
+                if not shot.image_prompt:
+                    from src.models.schemas import ImagePrompt
+                    shot.image_prompt = ImagePrompt(positive="", negative="")
+                
+                if request.positive_prompt is not None:
+                    shot.image_prompt.positive = request.positive_prompt
+                if request.negative_prompt is not None:
+                    shot.image_prompt.negative = request.negative_prompt
+            
+            # 重置视频状态和视频数据
+            shot.status = "frame_pending_review"  # 重置为首帧待审核状态
+            if "videos" in batch:
+                batch["videos"] = []  # 清空视频列表
+            
+            # 提交首帧生成任务
+            async def do_regenerate():
+                try:
+                    from src.services.jiekouai_service import InterfaceAIService
+                    
+                    image_service = InterfaceAIService()
+                    
+                    # 生成新seed（如果没有提供）
+                    new_seed = request.seed if request.seed is not None else random.randint(1, 999999999)
+                    
+                    # 使用已有的参考图（如果有）
+                    ref_images = []
+                    
+                    # 调用图片生成
+                    result = await image_service.generate_image(
+                        prompt=shot.image_prompt.positive if shot.image_prompt else shot.description,
+                        negative_prompt=shot.image_prompt.negative if shot.image_prompt else None,
+                        seed=new_seed,
+                        reference_images=ref_images
+                    )
+                    
+                    if result.get("success"):
+                        # 保存首帧
+                        keyframe_dir = Path(project.root_path) / "03_keyframes" / shot.shot_id
+                        keyframe_dir.mkdir(parents=True, exist_ok=True)
+                        
+                        import urllib.request
+                        keyframe_path = keyframe_dir / f"keyframe_{new_seed}.png"
+                        urllib.request.urlretrieve(result["url"], keyframe_path)
+                        
+                        # 更新batch
+                        batch["keyframe"] = {
+                            "path": str(keyframe_path),
+                            "url": result["url"],
+                            "status": "completed",
+                            "seed": new_seed,
+                            "created_at": datetime.now().isoformat()
+                        }
+                        
+                        project_manager.save_shots(project, shots)
+                        print(f"✅ 分镜 {shot.shot_id} 首帧重新生成完成: {keyframe_path}")
+                    else:
+                        batch["keyframe"] = {
+                            "status": "failed",
+                            "error": result.get("error", "未知错误"),
+                            "created_at": datetime.now().isoformat()
+                        }
+                        project_manager.save_shots(project, shots)
+                        print(f"❌ 分镜 {shot.shot_id} 首帧重新生成失败: {result.get('error')}")
+                        
+                except Exception as e:
+                    print(f"❌ 分镜 {shot.shot_id} 首帧重新生成异常: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    
+                    # 更新状态为失败
+                    batch["keyframe"] = {
+                        "status": "failed",
+                        "error": str(e),
+                        "created_at": datetime.now().isoformat()
+                    }
+                    project_manager.save_shots(project, shots)
+                finally:
+                    if 'image_service' in locals():
+                        await image_service.close()
+            
+            # 先保存状态更新
+            project_manager.save_shots(project, shots)
+            
+            # 提交到图片生成队列
+            image_queue = get_queue("image")
+            await image_queue.submit(do_regenerate, priority=TaskPriority.HIGH)
+            
+            return {
+                "status": "regenerating",
+                "shot_id": shot_id,
+                "message": "首帧重新生成任务已提交，视频状态已重置"
+            }
     
     raise HTTPException(status_code=404, detail="分镜不存在")
 
@@ -1326,37 +1652,47 @@ async def regenerate_character(project_id: str, character_id: str, request: Rege
                 # 生成文件名（不带扩展名，让API决定）
                 output_path = Path(project.root_path) / "02_references" / "characters" / f"{char.character_id}_v{version.version_id}"
                 
-                # 构建提示词
+                # 构建给LLM的指令提示词
                 if request.new_prompt:
-                    prompt = request.new_prompt
+                    # 用户直接提供的是图片提示词
+                    image_prompt = request.new_prompt
                 else:
+                    # 使用模板构建给LLM的指令
                     prompt_template = config.prompts.get("character_ref_prompt", "")
-                    prompt = prompt_template.replace("[[NAME]]", char.name or "")
-                    prompt = prompt.replace("[[DESCRIPTION]]", char.description or "")
-                    prompt = prompt.replace("[[PERSONALITY]]", char.personality or "")
-                    prompt = prompt.replace("[[STYLE]]", project.style_description or "")
+                    llm_prompt = prompt_template.replace("[[NAME]]", char.name or "")
+                    llm_prompt = llm_prompt.replace("[[DESCRIPTION]]", char.description or "")
+                    llm_prompt = llm_prompt.replace("[[PERSONALITY]]", char.personality or "")
+                    llm_prompt = llm_prompt.replace("[[STYLE]]", project.style_description or "")
+                    
+                    # 调用LLM生成英文图片提示词
+                    print(f"  🤖 调用LLM生成角色图片提示词...")
+                    from src.services.llm_service import LLMService
+                    llm_service = LLMService(config)
+                    image_prompt = await llm_service.generate(llm_prompt)
+                    print(f"  🤖 LLM返回: {image_prompt[:80]}...")
                 
-                # 生成图片 (接口AI不支持seed参数)
+                # 使用英文提示词生成图片
                 result = await service.generate_image(
-                    prompt=prompt,
+                    prompt=image_prompt,
                     width=512,
                     height=512
                 )
                 
-                if result.get("success") and result.get("url"):
-                    # 下载图片，自动检测扩展名
-                    actual_path = await service._download_image_with_ext(result["url"], output_path)
-                    version.path = str(actual_path)
-                    version.status = "pending_review"
-                    project_manager.save_characters(project, characters)
-                    print(f"✅ 角色 {char.name} 重新生成完成")
-                else:
-                    version.status = "error"
-                    version.error = result.get("error", "未知错误")
-                    project_manager.save_characters(project, characters)
-                    print(f"❌ 角色 {char.name} 重新生成失败: {result.get('error')}")
-                
-                await service.close()
+                try:
+                    if result.get("success") and result.get("url"):
+                        # 下载图片，自动检测扩展名
+                        actual_path = await service._download_image_with_ext(result["url"], output_path)
+                        version.path = str(actual_path)
+                        version.status = "pending_review"
+                        project_manager.save_characters(project, characters)
+                        print(f"✅ 角色 {char.name} 重新生成完成")
+                    else:
+                        version.status = "failed"
+                        version.rejected_reason = result.get("error", "未知错误")
+                        project_manager.save_characters(project, characters)
+                        print(f"❌ 角色 {char.name} 重新生成失败: {result.get('error')}")
+                finally:
+                    await service.close()
             
             image_queue = get_queue("image")
             await image_queue.submit(do_regenerate, priority=TaskPriority.HIGH)
@@ -1398,38 +1734,51 @@ async def regenerate_scene(project_id: str, scene_id: str, request: RegenerateRe
                 # 生成文件名（不带扩展名，让API决定）
                 output_path = Path(project.root_path) / "02_references" / "scenes" / f"{scene.scene_id}_v{version.version_id}"
                 
-                # 构建提示词
+                # 构建给LLM的指令提示词
                 if request.new_prompt:
-                    prompt = request.new_prompt
+                    # 用户直接提供的是图片提示词，不需要再让LLM生成
+                    image_prompt = request.new_prompt
                 else:
+                    # 使用模板构建给LLM的指令
                     prompt_template = config.prompts.get("scene_ref_prompt", "")
-                    prompt = prompt_template.replace("[[NAME]]", scene.name or "")
-                    prompt = prompt.replace("[[DESCRIPTION]]", scene.description or "")
-                    prompt = prompt.replace("[[LOCATION]]", scene.location or "")
-                    prompt = prompt.replace("[[TIME]]", scene.time or "")
-                    prompt = prompt.replace("[[STYLE]]", project.style_description or "")
+                    llm_prompt = prompt_template.replace("[[NAME]]", scene.name or "")
+                    llm_prompt = llm_prompt.replace("[[DESCRIPTION]]", scene.description or "")
+                    llm_prompt = llm_prompt.replace("[[LOCATION]]", scene.location or "")
+                    llm_prompt = llm_prompt.replace("[[TIME]]", scene.time or "")
+                    llm_prompt = llm_prompt.replace("[[STYLE]]", project.style_description or "")
+                    
+                    print(f"  📝 给LLM的指令: {llm_prompt[:100]}...")
+                    
+                    # 调用LLM生成英文图片提示词
+                    print(f"  🤖 调用LLM生成图片提示词...")
+                    from src.services.llm_service import LLMService
+                    llm_service = LLMService(config)
+                    image_prompt = await llm_service.generate(llm_prompt)
+                    print(f"  🤖 LLM返回的图片提示词: {image_prompt[:100]}...")
                 
-                # 生成图片 (接口AI不支持seed参数)
+                # 使用英文提示词生成图片
+                print(f"  🎨 开始生成图片，提示词: {image_prompt[:80]}...")
                 result = await service.generate_image(
-                    prompt=prompt,
-                    width=768,
-                    height=432
+                    prompt=image_prompt,
+                    width=512,
+                    height=512
                 )
                 
-                if result.get("success") and result.get("url"):
-                    # 下载图片，自动检测扩展名
-                    actual_path = await service._download_image_with_ext(result["url"], output_path)
-                    version.path = str(actual_path)
-                    version.status = "pending_review"
-                    project_manager.save_scenes(project, scenes)
-                    print(f"✅ 场景 {scene.name} 重新生成完成")
-                else:
-                    version.status = "error"
-                    version.error = result.get("error", "未知错误")
-                    project_manager.save_scenes(project, scenes)
-                    print(f"❌ 场景 {scene.name} 重新生成失败: {result.get('error')}")
-                
-                await service.close()
+                try:
+                    if result.get("success") and result.get("url"):
+                        # 下载图片，自动检测扩展名
+                        actual_path = await service._download_image_with_ext(result["url"], output_path)
+                        version.path = str(actual_path)
+                        version.status = "pending_review"
+                        project_manager.save_scenes(project, scenes)
+                        print(f"✅ 场景 {scene.name} 重新生成完成")
+                    else:
+                        version.status = "failed"
+                        version.rejected_reason = result.get("error", "未知错误")
+                        project_manager.save_scenes(project, scenes)
+                        print(f"❌ 场景 {scene.name} 重新生成失败: {result.get('error')}")
+                finally:
+                    await service.close()
             
             image_queue = get_queue("image")
             await image_queue.submit(do_regenerate, priority=TaskPriority.HIGH)
@@ -1483,13 +1832,112 @@ class APIProviderRequest(BaseModel):
     custom_fields: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
+def _convert_defaults_to_providers(config: Config) -> Dict[str, List[Dict]]:
+    """将defaults配置转换为APIProvider格式
+    
+    这样可以在前端统一显示配置文件中的默认API设置
+    """
+    builtin_providers = {"llm": [], "image": [], "video": []}
+    
+    # LLM 默认配置
+    llm_config = config.defaults.llm
+    if llm_config.base_url:
+        builtin_providers["llm"].append({
+            "id": "builtin_llm",
+            "name": f"内置LLM ({llm_config.provider})",
+            "type": "llm",
+            "enabled": True,
+            "is_default": True,
+            "is_builtin": True,  # 标记为内置配置
+            "base_url": llm_config.base_url,
+            "model": llm_config.model,
+            "timeout": llm_config.timeout,
+            "api_key": None,  # 不显示API Key
+            "endpoint": None,
+            "headers": {},
+            "custom_fields": {
+                "temperature": llm_config.temperature,
+                "max_tokens": llm_config.max_tokens
+            },
+            "verified": None,
+            "latency": None
+        })
+    
+    # Image 默认配置
+    image_config = config.defaults.image
+    if image_config.base_url:
+        builtin_providers["image"].append({
+            "id": "builtin_image",
+            "name": f"内置Image ({image_config.provider})",
+            "type": "image",
+            "enabled": True,
+            "is_default": True,
+            "is_builtin": True,
+            "base_url": image_config.base_url,
+            "model": None,
+            "endpoint": image_config.endpoint,
+            "timeout": image_config.timeout,
+            "api_key": None,
+            "headers": {},
+            "custom_fields": {
+                "default_steps": image_config.default_steps,
+                "default_cfg": image_config.default_cfg
+            },
+            "verified": None,
+            "latency": None
+        })
+    
+    # Video 默认配置
+    video_config = config.defaults.video
+    if video_config.base_url:
+        builtin_providers["video"].append({
+            "id": "builtin_video",
+            "name": f"内置Video ({video_config.provider})",
+            "type": "video",
+            "enabled": True,
+            "is_default": True,
+            "is_builtin": True,
+            "base_url": video_config.base_url,
+            "model": None,
+            "timeout": video_config.timeout,
+            "api_key": None,
+            "endpoint": None,
+            "headers": {},
+            "custom_fields": {
+                "duration": video_config.duration
+            },
+            "verified": None,
+            "latency": None
+        })
+    
+    return builtin_providers
+
+
 @app.get("/api/providers")
 async def get_providers():
-    """获取所有API提供商配置"""
+    """获取所有API提供商配置
+    
+    返回内容包括：
+    1. 配置文件中的默认API设置（内置提供商）
+    2. 用户手动添加的API提供商
+    """
     try:
         config = Config.load_global()
-        return config.providers
+        
+        # 获取内置提供商（来自defaults配置）
+        builtin_providers = _convert_defaults_to_providers(config)
+        
+        # 合并内置提供商和用户添加的提供商
+        result = {
+            "llm": builtin_providers["llm"] + [p.model_dump() if hasattr(p, 'model_dump') else p for p in config.providers.get("llm", [])],
+            "image": builtin_providers["image"] + [p.model_dump() if hasattr(p, 'model_dump') else p for p in config.providers.get("image", [])],
+            "video": builtin_providers["video"] + [p.model_dump() if hasattr(p, 'model_dump') else p for p in config.providers.get("video", [])],
+        }
+        
+        return result
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"获取提供商失败: {str(e)}")
 
 
@@ -1616,6 +2064,9 @@ class ParseCurlRequest(BaseModel):
 async def parse_curl(request: ParseCurlRequest):
     """解析CURL命令，返回解析后的字段"""
     try:
+        import re
+        import json
+        
         curl_text = request.curl_command.strip()
         result = {
             "base_url": "",
@@ -1626,10 +2077,13 @@ async def parse_curl(request: ParseCurlRequest):
             "method": "GET"
         }
         
-        import re
+        # 解析URL (支持 --url 和直接跟在curl后面的URL)
+        # 先尝试匹配 --url 格式
+        url_match = re.search(r'--url\s+["\']?([^"\'\s]+)', curl_text, re.IGNORECASE)
+        if not url_match:
+            # 再尝试匹配 curl 后面直接跟URL的格式
+            url_match = re.search(r'curl\s+["\']?([^"\'\s]+)', curl_text, re.IGNORECASE)
         
-        # 解析URL
-        url_match = re.search(r'curl\s+["\']?([^"\'\s]+)', curl_text, re.IGNORECASE)
         if url_match:
             full_url = url_match.group(1)
             # 分离base_url和endpoint
@@ -1639,13 +2093,14 @@ async def parse_curl(request: ParseCurlRequest):
                 if len(parsed) >= 4:
                     result["endpoint"] = "/" + parsed[3]
         
-        # 解析 -X 方法
-        method_match = re.search(r'-X\s+(\w+)', curl_text)
+        # 解析方法 (支持 --request 和 -X)
+        method_match = re.search(r'(?:-X|--request)\s+["\']?(\w+)["\']?', curl_text, re.IGNORECASE)
         if method_match:
             result["method"] = method_match.group(1).upper()
         
-        # 解析 headers
-        header_matches = re.findall(r'-H\s+["\']([^"\']+)["\']', curl_text)
+        # 解析 headers (支持 --header 和 -H)
+        # 匹配 -H 'key: value' 或 --header 'key: value' 格式
+        header_matches = re.findall(r'(?:-H|--header)\s+["\']([^"\']+)["\']', curl_text, re.IGNORECASE)
         for header in header_matches:
             if ':' in header:
                 key, value = header.split(':', 1)
@@ -1660,20 +2115,29 @@ async def parse_curl(request: ParseCurlRequest):
                     else:
                         result["api_key"] = value
         
-        # 解析 -d data
-        data_match = re.search(r'-d\s+["\']([^"\']+)["\']', curl_text)
+        # 解析 data (支持 --data 和 -d，以及多行JSON)
+        # 尝试匹配单行格式: -d '{...}' 或 --data '{...}'
+        data_match = re.search(r'(?:-d|--data)\s+["\']([\s\S]*?)["\'](?:\s+-|$)', curl_text, re.IGNORECASE)
+        
+        # 如果没匹配到，尝试匹配多行格式（data后面跟着换行和JSON）
+        if not data_match:
+            data_match = re.search(r'(?:-d|--data)\s+["\']?\s*\n?\s*([\{\[][\s\S]*?[\}\]])', curl_text, re.IGNORECASE)
+        
         if data_match:
             try:
-                data_str = data_match.group(1)
+                data_str = data_match.group(1).strip()
                 # 尝试解析JSON
                 data_json = json.loads(data_str)
                 if "model" in data_json:
                     result["model"] = data_json["model"]
-            except:
+            except Exception as e:
+                # JSON解析失败，忽略
                 pass
         
         return result
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"解析CURL命令失败: {str(e)}")
 
 
@@ -1690,14 +2154,54 @@ async def verify_provider(provider_id: str):
         
         # 查找提供商
         provider = None
-        for provider_type, providers in config.providers.items():
-            for p in providers:
-                if isinstance(p, dict) and p.get("id") == provider_id:
-                    provider = p
-                    provider["_type"] = provider_type
+        is_builtin = False
+        
+        # 检查是否为内置提供商
+        if provider_id == "builtin_llm":
+            provider = {
+                "id": "builtin_llm",
+                "name": f"内置LLM ({config.defaults.llm.provider})",
+                "type": "llm",
+                "base_url": config.defaults.llm.base_url,
+                "api_key": settings.openai_api_key,  # 从lLM配置获取API Key
+                "model": config.defaults.llm.model,
+                "timeout": config.defaults.llm.timeout,
+                "headers": {},
+            }
+            is_builtin = True
+        elif provider_id == "builtin_image":
+            provider = {
+                "id": "builtin_image",
+                "name": f"内置Image ({config.defaults.image.provider})",
+                "type": "image",
+                "base_url": config.defaults.image.base_url,
+                "api_key": settings.jiekouai_api_key,  # 从settings获取
+                "endpoint": config.defaults.image.endpoint,
+                "timeout": config.defaults.image.timeout,
+                "headers": {},
+            }
+            is_builtin = True
+        elif provider_id == "builtin_video":
+            provider = {
+                "id": "builtin_video",
+                "name": f"内置Video ({config.defaults.video.provider})",
+                "type": "video",
+                "base_url": config.defaults.video.base_url,
+                "api_key": settings.jiekouai_api_key,  # 从settings获取
+                "timeout": config.defaults.video.timeout,
+                "headers": {},
+            }
+            is_builtin = True
+        else:
+            # 查找用户添加的提供商
+            for provider_type, providers in config.providers.items():
+                for p in providers:
+                    if isinstance(p, dict) and p.get("id") == provider_id:
+                        provider = p
+                        provider["_type"] = provider_type
+                        break
+                if provider:
                     break
-            if provider:
-                break
         
         if not provider:
             raise HTTPException(status_code=404, detail="提供商不存在")
@@ -1735,11 +2239,12 @@ async def verify_provider(provider_id: str):
                     ) as resp:
                         if resp.status in [200, 201]:
                             latency = int((time.time() - start_time) * 1000)
-                            # 更新验证状态
-                            provider["verified"] = True
-                            provider["verified_at"] = datetime.now().isoformat()
-                            provider["latency"] = latency
-                            config.save_global_config(use_json=True)
+                            # 更新验证状态（仅对非内置提供商保存）
+                            if not is_builtin:
+                                provider["verified"] = True
+                                provider["verified_at"] = datetime.now().isoformat()
+                                provider["latency"] = latency
+                                config.save_global_config(use_json=True)
                             return {"valid": True, "latency": latency}
                         else:
                             text = await resp.text()
@@ -1769,10 +2274,12 @@ async def verify_provider(provider_id: str):
                         return {"valid": False, "error": "API Key未配置"}
                     
                     latency = int((time.time() - start_time) * 1000)
-                    provider["verified"] = True
-                    provider["verified_at"] = datetime.now().isoformat()
-                    provider["latency"] = latency
-                    config.save_global_config(use_json=True)
+                    # 仅对非内置提供商保存验证状态
+                    if not is_builtin:
+                        provider["verified"] = True
+                        provider["verified_at"] = datetime.now().isoformat()
+                        provider["latency"] = latency
+                        config.save_global_config(use_json=True)
                     return {"valid": True, "latency": latency, "note": "基础连接验证通过"}
             except Exception as e:
                 return {"valid": False, "error": f"验证失败: {str(e)}"}
@@ -1784,10 +2291,12 @@ async def verify_provider(provider_id: str):
                     return {"valid": False, "error": "API Key未配置"}
                 
                 latency = int((time.time() - start_time) * 1000)
-                provider["verified"] = True
-                provider["verified_at"] = datetime.now().isoformat()
-                provider["latency"] = latency
-                config.save_global_config(use_json=True)
+                # 仅对非内置提供商保存验证状态
+                if not is_builtin:
+                    provider["verified"] = True
+                    provider["verified_at"] = datetime.now().isoformat()
+                    provider["latency"] = latency
+                    config.save_global_config(use_json=True)
                 return {"valid": True, "latency": latency, "note": "基础配置验证通过"}
             except Exception as e:
                 return {"valid": False, "error": f"验证失败: {str(e)}"}
@@ -1798,6 +2307,72 @@ async def verify_provider(provider_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"验证提供商失败: {str(e)}")
+
+
+# ============ 默认提供商API ============
+
+@app.get("/api/providers/default/{provider_type}")
+async def get_default_provider(provider_type: str):
+    """获取指定类型的默认提供商"""
+    try:
+        config = Config.load_global()
+        
+        if provider_type not in ["llm", "image", "video"]:
+            raise HTTPException(status_code=400, detail="无效的提供商类型")
+        
+        providers = config.providers.get(provider_type, [])
+        
+        # 查找默认提供商
+        for provider in providers:
+            if isinstance(provider, dict) and provider.get("is_default"):
+                return provider
+        
+        # 如果没有默认提供商，返回第一个启用的提供商
+        for provider in providers:
+            if isinstance(provider, dict) and provider.get("enabled", True):
+                return provider
+        
+        return None
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取默认提供商失败: {str(e)}")
+
+
+@app.post("/api/providers/{provider_id}/set-default")
+async def set_default_provider(provider_id: str):
+    """设置默认提供商"""
+    try:
+        config = Config.load_global()
+        
+        # 查找提供商并设置为默认
+        found = False
+        provider_type = None
+        
+        for ptype, providers in config.providers.items():
+            for provider in providers:
+                if isinstance(provider, dict) and provider.get("id") == provider_id:
+                    # 将同类型的其他提供商设置为非默认
+                    for p in providers:
+                        if isinstance(p, dict):
+                            p["is_default"] = False
+                    # 设置当前提供商为默认
+                    provider["is_default"] = True
+                    found = True
+                    provider_type = ptype
+                    break
+            if found:
+                break
+        
+        if not found:
+            raise HTTPException(status_code=404, detail="提供商不存在")
+        
+        config.save_global_config(use_json=True)
+        return {"status": "success", "message": f"已设置为默认{provider_type}提供商"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"设置默认提供商失败: {str(e)}")
 
 
 # ============ 主入口 ============

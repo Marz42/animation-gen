@@ -57,6 +57,16 @@ export const videoApi = {
   list: (projectId) => api.get(`/projects/${projectId}/videos`),
   checkStatus: (projectId, shotId) => 
     api.post(`/projects/${projectId}/videos/${shotId}/check-status`, {}),
+  // 视频Prompt相关
+  generateVideoPrompt: (projectId, shotId, data = {}) => 
+    api.post(`/projects/${projectId}/shots/${shotId}/generate-video-prompt`, data),
+  getVideoPrompt: (projectId, shotId) => 
+    api.get(`/projects/${projectId}/shots/${shotId}/video-prompt`),
+  saveVideoPrompt: (projectId, shotId, data) => 
+    api.post(`/projects/${projectId}/shots/${shotId}/video-prompt`, data),
+  // 从视频页面重新生成首帧
+  regenerateKeyframe: (projectId, shotId, data = {}) => 
+    api.post(`/projects/${projectId}/shots/${shotId}/regenerate-keyframe-from-video`, data),
 }
 
 // 队列
@@ -84,6 +94,8 @@ export const providerApi = {
   delete: (id) => api.delete(`/providers/${id}`),
   parseCurl: (curlCommand) => api.post('/providers/parse-curl', { curl_command: curlCommand }),
   verify: (id) => api.post(`/providers/${id}/verify`),
+  getDefault: (type) => api.get(`/providers/default/${type}`),
+  setDefault: (id) => api.post(`/providers/${id}/set-default`),
 }
 
 export default api

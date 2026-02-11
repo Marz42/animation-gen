@@ -168,13 +168,32 @@
           :closable="false"
           style="margin-bottom: 15px;"
         />
+        <el-alert
+          title="提示词中可使用以下变量占位符来引用前阶段解析的场景、角色和剧本信息"
+          type="warning"
+          :closable="false"
+          style="margin-bottom: 15px;"
+        />
         <el-form label-position="top">
-          <el-form-item label="分镜设计提示词 (shot_design)">
+          <el-form-item>
+            <template #label>
+              <span>分镜设计提示词 (shot_design)</span>
+              <el-tooltip placement="top">
+                <template #content>
+                  可用变量：<br/>
+                  {scene_name} - 场景名称<br/>
+                  {scene_description} - 场景描述<br/>
+                  {characters} - 角色列表（已格式化）<br/>
+                  {script_segment} - 该场景对应的剧本片段
+                </template>
+                <el-icon style="margin-left: 4px; color: #909399;"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </template>
             <el-input 
               v-model="promptForm.shot_design" 
               type="textarea" 
               :rows="20"
-              placeholder="输入分镜设计提示词..."
+              placeholder="输入分镜设计提示词...&#10;&#10;可用变量:&#10;{scene_name} - 场景名称&#10;{scene_description} - 场景描述&#10;{characters} - 角色列表（已格式化）&#10;{script_segment} - 该场景对应的剧本片段"
             />
           </el-form-item>
         </el-form>
@@ -192,6 +211,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { QuestionFilled, Edit, Refresh } from '@element-plus/icons-vue'
 import { shotApi, promptApi } from '../api'
 import { useProjectStore } from '../stores/project'
 

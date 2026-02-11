@@ -91,21 +91,39 @@
 
     <!-- 提示词编辑对话框 -->
     <el-dialog v-model="showPromptDialog" title="编辑剧本解析提示词" width="800px">
+      <el-alert
+        title="提示词中可使用以下变量占位符来引用前阶段内容"
+        type="info"
+        :closable="false"
+        style="margin-bottom: 15px;"
+      />
       <el-form :model="prompts" label-width="120px">
         <el-form-item label="角色提取提示词">
+          <template #label>
+            <span>角色提取提示词</span>
+            <el-tooltip content="可用变量: [[SCRIPT]] - 剧本内容" placement="top">
+              <el-icon style="margin-left: 4px; color: #909399;"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </template>
           <el-input 
             v-model="prompts.character_extraction" 
             type="textarea" 
             :rows="8"
-            placeholder="编辑角色提取的提示词..."
+            placeholder="编辑角色提取的提示词...&#10;&#10;可用变量:&#10;[[SCRIPT]] - 剧本原文内容"
           />
         </el-form-item>
         <el-form-item label="场景提取提示词">
+          <template #label>
+            <span>场景提取提示词</span>
+            <el-tooltip content="可用变量: [[SCRIPT]] - 剧本内容" placement="top">
+              <el-icon style="margin-left: 4px; color: #909399;"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </template>
           <el-input 
             v-model="prompts.scene_extraction" 
             type="textarea" 
             :rows="8"
-            placeholder="编辑场景提取的提示词..."
+            placeholder="编辑场景提取的提示词...&#10;&#10;可用变量:&#10;[[SCRIPT]] - 剧本原文内容"
           />
         </el-form-item>
       </el-form>
@@ -120,6 +138,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { QuestionFilled, Refresh } from '@element-plus/icons-vue'
 import { scriptApi } from '../api'
 import { useProjectStore } from '../stores/project'
 import axios from 'axios'

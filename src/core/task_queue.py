@@ -189,7 +189,7 @@ class AsyncTaskQueue:
             logger.info(f"[{self.name}] 任务完成: {task.task_id}")
             
         except Exception as e:
-            task.error = str(e)
+            task.error_message = str(e)
             task.retry_count += 1
             
             if task.retry_count < task.max_retries:

@@ -1,5 +1,60 @@
 # 更新日志 (Changelog)
 
+## [Unreleased] - 2026-02-10
+
+### 新增功能
+
+#### API提供商管理
+- ✅ 内置API提供商支持（builtin_llm, builtin_image, builtin_video）
+- ✅ API提供商配置导入/导出（CURL命令解析）
+- ✅ 提供商验证功能（连通性测试）
+- ✅ 默认提供商设置
+- ✅ 提供商状态显示（内置/用户定义）
+
+#### 视频生成页面增强
+- ✅ 显示首帧图片缩略图
+- ✅ 分镜选择功能（单选/多选）
+- ✅ 批量生成视频Prompt
+- ✅ 批量生成视频
+- ✅ 首帧Prompt编辑和重新生成（从视频页面）
+- ✅ 视频Prompt自动生成（基于剧本+首帧Prompt）
+- ✅ 视频Prompt手动编辑
+- ✅ 视频Prompt模板自定义
+
+#### 系统优化
+- ✅ 成本预估API修复（添加total_seconds字段）
+- ✅ 场景参考图生成使用LLM翻译（中文→英文）
+- ✅ CURL导入支持更多格式（--url, --request, --header, --data）
+- ✅ 内置提供商验证支持（不保存到配置文件）
+
+### API变更
+
+#### 新增端点
+```
+GET    /api/providers                     # 获取所有提供商（包含内置）
+POST   /api/providers                     # 创建提供商
+PUT    /api/providers/{id}                # 更新提供商
+DELETE /api/providers/{id}                # 删除提供商
+POST   /api/providers/{id}/verify         # 验证提供商
+POST   /api/providers/{id}/set-default    # 设为默认
+POST   /api/providers/parse-curl          # 解析CURL命令
+GET    /api/providers/default/{type}      # 获取默认提供商
+POST   /api/config/export                 # 导出配置
+POST   /api/config/import                 # 导入配置
+POST   /api/projects/{id}/shots/{id}/generate-video-prompt    # 生成视频Prompt
+GET    /api/projects/{id}/shots/{id}/video-prompt              # 获取视频Prompt
+POST   /api/projects/{id}/shots/{id}/video-prompt              # 保存视频Prompt
+POST   /api/projects/{id}/shots/{id}/regenerate-keyframe-from-video  # 从视频页重新生成首帧
+```
+
+### 修复问题
+1. **成本预估404** - 修复内置提供商的验证端点
+2. **成本预估字段缺失** - 添加total_seconds字段到视频服务estimate_cost
+3. **场景参考图中文问题** - 使用LLM将中文描述翻译为英文Prompt
+4. **CURL解析** - 支持更多CURL命令格式
+
+---
+
 ## [v1.0.0] - 2026-02-09
 
 ### 首次发布 🎉

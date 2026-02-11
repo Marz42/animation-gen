@@ -140,6 +140,10 @@ class ImageService:
         llm_service = LLMService(self.config)
         prompt = await llm_service.generate_character_prompt(character, style_description)
         
+        # 检查提示词长度
+        full_prompt = f"{prompt}, {style_description}, high quality, detailed"
+        print(f"  📝 角色提示词长度: {len(full_prompt)} 字符")
+        
         # 解析分辨率
         res = self.config.defaults.generation.character_ref_resolution
         
@@ -208,12 +212,19 @@ class ImageService:
         llm_service = LLMService(self.config)
         prompt = await llm_service.generate_scene_prompt(scene, style_description)
         
+        # 检查提示词长度
+        full_prompt = f"{prompt}, {style_description}, high quality, detailed"
+        print(f"  📝 场景提示词长度: {len(full_prompt)} 字符")
+        if len(full_prompt) > 1000:
+            print(f"  ⚠️ 警告: 提示词超过1000字符，可能被API拒绝")
+            print(f"  📝 提示词前100字符: {full_prompt[:100]}...")
+        
         res = self.config.defaults.generation.scene_ref_resolution
         
         # 根据provider选择生成方式
         if self.image_config.provider == "jiekouai" and self.jiekouai_service:
             actual_path = await self.jiekouai_service.generate_scene_reference(
-                prompt=f"{prompt}, {style_description}, high quality, detailed",
+                prompt=full_prompt,
                 output_path=output_path,
                 size=res,
                 reference_image_url=reference_image_url  # 传递参考图URL

@@ -81,10 +81,11 @@ class JiekouAIImageService:
         width: int = 512,
         height: int = 512,
         n: int = 1,
-        response_format: str = "url"
+        response_format: str = "url",
+        max_retries: int = 3
     ) -> Dict[str, Any]:
         """
-        生成图片
+        生成图片（支持重试）
         
         Args:
             prompt: 提示词
@@ -92,6 +93,7 @@ class JiekouAIImageService:
             height: 图片高度
             n: 生成数量
             response_format: 响应格式 (url 或 base64)
+            max_retries: 最大重试次数
         
         Returns:
             包含图片URL或base64的字典
@@ -114,49 +116,109 @@ class JiekouAIImageService:
         
         url = f"{self.base_url}{self.endpoint}"
         
-        try:
-            async with session.post(
-                url,
-                json=payload,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=120)  # 2分钟超时
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    
-                    # 解析响应
-                    # 假设响应格式为: {"data": [{"url": "..."}]}
-                    if "data" in data and len(data["data"]) > 0:
-                        image_data = data["data"][0]
-                        return {
-                            "success": True,
-                            "url": image_data.get("url"),
-                            "base64": image_data.get("b64_json"),
-                            "prompt": prompt,
-                            "cost_usd": 0.02  # 假设成本
-                        }
+        for attempt in range(max_retries):
+            try:
+                print(f"    🚀 提交图片生成任务 (尝试 {attempt + 1}/{max_retries})")
+                print(f"    📌 URL: {url}")
+                print(f"    📌 Prompt: {prompt[:100]}...")
+                print(f"    📌 Size: {width}x{height} -> {self._map_size(width, height)}")
+                print(f"    📌 Quality: {self._map_quality(width, height)}")
+                print(f"    📌 Request Body: {payload}")
+                
+                import time
+                start_time = time.time()
+                
+                async with session.post(
+                    url,
+                    json=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=120)
+                ) as response:
+                    elapsed = time.time() - start_time
+                    print(f"    ⏱️ 请求耗时: {elapsed:.2f}秒")
+                    if response.status == 200:
+                        data = await response.json()
+                        print(f"    📥 HTTP 200 响应")
+                        print(f"    📥 响应内容: {data}")
+                        print(f"    📥 响应键: {list(data.keys())}")
+                        
+                        # 检查是否返回了图片URL
+                        if data.get("data"):
+                            print(f"    📥 data字段存在: {type(data['data'])}, 长度: {len(data['data']) if isinstance(data['data'], list) else 'N/A'}")
+                            if isinstance(data["data"], list) and len(data["data"]) > 0:
+                                image_data = data["data"][0]
+                                print(f"    📥 image_data: {image_data}")
+                                if image_data.get("url"):
+                                    print(f"    ✅ 成功获取URL: {image_data['url'][:60]}...")
+                                    return {
+                                        "success": True,
+                                        "url": image_data.get("url"),
+                                        "base64": image_data.get("b64_json"),
+                                        "prompt": prompt,
+                                        "cost_usd": 0.02
+                                    }
+                                else:
+                                    print(f"    ⚠️ image_data 没有 url 字段")
+                            else:
+                                print(f"    ⚠️ data 为空或不是列表")
+                        else:
+                            print(f"    ⚠️ 响应没有 data 字段")
+                        
+                        # 检查是否有错误信息
+                        if "error" in data:
+                            error_msg = f"API错误: {data['error']}"
+                            print(f"    ❌ {error_msg}")
+                            if attempt < max_retries - 1:
+                                await asyncio.sleep(2 ** attempt)
+                                continue
+                            return {"success": False, "error": error_msg, "raw_response": data}
+                        
+                        if data.get("message"):
+                            print(f"    ℹ️ API返回message: {data['message']}")
+                        
+                        # 重试
+                        error_msg = f"API未返回图片URL: {data}"
+                        print(f"    ⚠️ {error_msg}")
+                        if attempt < max_retries - 1:
+                            wait_time = 2 ** attempt
+                            print(f"    ⏳ 等待{wait_time}秒后重试...")
+                            await asyncio.sleep(wait_time)
+                            continue
+                        return {"success": False, "error": error_msg, "raw_response": data}
                     else:
-                        return {
-                            "success": False,
-                            "error": "API返回格式异常",
-                            "raw_response": data
-                        }
-                else:
-                    error_text = await response.text()
-                    return {
-                        "success": False,
-                        "error": f"API错误: {response.status} - {error_text}"
-                    }
-        except asyncio.TimeoutError:
-            return {
-                "success": False,
-                "error": "请求超时"
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"请求异常: {str(e)}"
-            }
+                        error_text = await response.text()
+                        error_msg = f"API错误: HTTP {response.status}"
+                        print(f"    ❌ {error_msg}")
+                        print(f"    ❌ 响应内容: {error_text[:500]}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(2 ** attempt)
+                            continue
+                        return {"success": False, "error": error_msg, "raw_response": error_text}
+                        
+            except asyncio.TimeoutError:
+                print(f"    ⏱️ 请求超时 (尝试 {attempt + 1}/{max_retries})")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                return {
+                    "success": False,
+                    "error": "请求超时"
+                }
+            except Exception as e:
+                error_msg = f"请求异常: {str(e)}"
+                print(f"    ❌ {error_msg}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                return {
+                    "success": False,
+                    "error": error_msg
+                }
+        
+        return {
+            "success": False,
+            "error": "达到最大重试次数"
+        }
     
     async def generate_character_reference(
         self,
@@ -193,10 +255,11 @@ class JiekouAIImageService:
         width: int = 512,
         height: int = 512,
         n: int = 1,
-        response_format: str = "url"
+        response_format: str = "url",
+        max_retries: int = 3
     ) -> Dict[str, Any]:
         """
-        使用 i2i (image-to-image) API 生成图片
+        使用 i2i (image-to-image) API 生成图片（支持重试）
         
         API端点: POST https://api.jiekou.ai/v3/nano-banana-pro-light-i2i
         
@@ -207,6 +270,7 @@ class JiekouAIImageService:
             height: 图片高度
             n: 生成数量
             response_format: 响应格式
+            max_retries: 最大重试次数
         
         Returns:
             包含图片URL或base64的字典
@@ -217,7 +281,7 @@ class JiekouAIImageService:
         payload = {
             "n": n,
             "size": self._map_size(width, height),
-            "images": [image_url],  # 参考图片URL (字符串数组)
+            "images": [image_url],
             "prompt": prompt,
             "quality": self._map_quality(width, height),
             "response_format": response_format
@@ -228,50 +292,70 @@ class JiekouAIImageService:
             "Authorization": f"Bearer {self.api_key}"
         }
         
-        # i2i 端点
         url = f"{self.base_url}/v3/nano-banana-pro-light-i2i"
         
-        try:
-            async with session.post(
-                url,
-                json=payload,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=120)
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    
-                    if "data" in data and len(data["data"]) > 0:
-                        image_data = data["data"][0]
-                        return {
-                            "success": True,
-                            "url": image_data.get("url"),
-                            "base64": image_data.get("b64_json"),
-                            "prompt": prompt,
-                            "cost_usd": 0.02
-                        }
+        for attempt in range(max_retries):
+            try:
+                print(f"    🚀 提交i2i图片生成任务 (尝试 {attempt + 1}/{max_retries})")
+                async with session.post(
+                    url,
+                    json=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=120)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        print(f"    📥 响应: {data}")
+                        
+                        if data.get("data") and len(data["data"]) > 0:
+                            image_data = data["data"][0]
+                            if image_data.get("url"):
+                                return {
+                                    "success": True,
+                                    "url": image_data.get("url"),
+                                    "base64": image_data.get("b64_json"),
+                                    "prompt": prompt,
+                                    "cost_usd": 0.02
+                                }
+                        
+                        if "error" in data:
+                            error_msg = f"API错误: {data['error']}"
+                            print(f"    ❌ {error_msg}")
+                            if attempt < max_retries - 1:
+                                await asyncio.sleep(2 ** attempt)
+                                continue
+                            return {"success": False, "error": error_msg, "raw_response": data}
+                        
+                        error_msg = f"API未返回图片URL: {data}"
+                        print(f"    ⚠️ {error_msg}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(2 ** attempt)
+                            continue
+                        return {"success": False, "error": error_msg, "raw_response": data}
                     else:
-                        return {
-                            "success": False,
-                            "error": "API返回格式异常",
-                            "raw_response": data
-                        }
-                else:
-                    error_text = await response.text()
-                    return {
-                        "success": False,
-                        "error": f"API错误: {response.status} - {error_text}"
-                    }
-        except asyncio.TimeoutError:
-            return {
-                "success": False,
-                "error": "请求超时"
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"请求异常: {str(e)}"
-            }
+                        error_text = await response.text()
+                        error_msg = f"API错误: {response.status} - {error_text}"
+                        print(f"    ❌ {error_msg}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(2 ** attempt)
+                            continue
+                        return {"success": False, "error": error_msg}
+                        
+            except asyncio.TimeoutError:
+                print(f"    ⏱️ 请求超时 (尝试 {attempt + 1}/{max_retries})")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                return {"success": False, "error": "请求超时"}
+            except Exception as e:
+                error_msg = f"请求异常: {str(e)}"
+                print(f"    ❌ {error_msg}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                return {"success": False, "error": error_msg}
+        
+        return {"success": False, "error": "达到最大重试次数"}
 
     async def generate_scene_reference(
         self,
@@ -430,10 +514,11 @@ class JiekouAIImageService:
         width: int = 512,
         height: int = 512,
         n: int = 1,
-        response_format: str = "url"
+        response_format: str = "url",
+        max_retries: int = 3
     ) -> Dict[str, Any]:
         """
-        使用多图i2i (image-to-image) API 生成图片
+        使用多图i2i (image-to-image) API 生成图片（支持重试）
         
         Args:
             prompt: 提示词
@@ -442,13 +527,12 @@ class JiekouAIImageService:
             height: 图片高度
             n: 生成数量
             response_format: 响应格式
+            max_retries: 最大重试次数
         
         Returns:
             包含图片URL或base64的字典
         """
         session = await self._get_session()
-
-        # 构建images数组 - 接口AI期望字符串数组（URL）
         images = [url for url in image_urls if url]
 
         payload = {
@@ -466,56 +550,69 @@ class JiekouAIImageService:
         }
 
         url = f"{self.base_url}/v3/nano-banana-pro-light-i2i"
-
         print(f"    📤 发送i2i请求: {url}, images={len(images)}")
 
-        try:
-            async with session.post(
-                url,
-                json=payload,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=120)
-            ) as response:
-                print(f"    📥 收到响应: status={response.status}")
-                if response.status == 200:
-                    data = await response.json()
-                    print(f"    ✅ 解析响应成功")
+        for attempt in range(max_retries):
+            try:
+                async with session.post(
+                    url,
+                    json=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=120)
+                ) as response:
+                    print(f"    📥 收到响应: status={response.status}")
+                    if response.status == 200:
+                        data = await response.json()
+                        print(f"    ✅ 解析响应成功: {data}")
 
-                    if "data" in data and len(data["data"]) > 0:
-                        image_data = data["data"][0]
-                        return {
-                            "success": True,
-                            "url": image_data.get("url"),
-                            "base64": image_data.get("b64_json"),
-                            "prompt": prompt,
-                            "cost_usd": 0.02
-                        }
+                        if data.get("data") and len(data["data"]) > 0:
+                            image_data = data["data"][0]
+                            if image_data.get("url"):
+                                return {
+                                    "success": True,
+                                    "url": image_data.get("url"),
+                                    "base64": image_data.get("b64_json"),
+                                    "prompt": prompt,
+                                    "cost_usd": 0.02
+                                }
+                        
+                        if "error" in data:
+                            error_msg = f"API错误: {data['error']}"
+                            print(f"    ❌ {error_msg}")
+                            if attempt < max_retries - 1:
+                                await asyncio.sleep(2 ** attempt)
+                                continue
+                            return {"success": False, "error": error_msg, "raw_response": data}
+                        
+                        error_msg = f"API未返回图片URL: {data}"
+                        print(f"    ⚠️ {error_msg}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(2 ** attempt)
+                            continue
+                        return {"success": False, "error": error_msg, "raw_response": data}
                     else:
-                        print(f"    ⚠️ API返回格式异常: {data.keys()}")
-                        return {
-                            "success": False,
-                            "error": "API返回格式异常",
-                            "raw_response": data
-                        }
-                else:
-                    error_text = await response.text()
-                    print(f"    ❌ API错误: {response.status} - {error_text[:100]}")
-                    return {
-                        "success": False,
-                        "error": f"API错误: {response.status} - {error_text}"
-                    }
-        except asyncio.TimeoutError:
-            print(f"    ⏱️ 请求超时")
-            return {
-                "success": False,
-                "error": "请求超时"
-            }
-        except Exception as e:
-            print(f"    ❌ 请求异常: {e}")
-            return {
-                "success": False,
-                "error": f"请求异常: {str(e)}"
-            }
+                        error_text = await response.text()
+                        error_msg = f"API错误: {response.status} - {error_text}"
+                        print(f"    ❌ {error_msg}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(2 ** attempt)
+                            continue
+                        return {"success": False, "error": error_msg}
+                        
+            except asyncio.TimeoutError:
+                print(f"    ⏱️ 请求超时 (尝试 {attempt + 1}/{max_retries})")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                return {"success": False, "error": "请求超时"}
+            except Exception as e:
+                print(f"    ❌ 请求异常: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                return {"success": False, "error": f"请求异常: {str(e)}"}
+        
+        return {"success": False, "error": "达到最大重试次数"}
     
     async def _download_image(self, url: str, output_path: Path):
         """下载图片到本地"""

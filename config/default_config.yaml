@@ -171,11 +171,11 @@ prompts:
     提示词应该描述角色的完整外观，适合作为角色参考图。
     
     角色信息：
-    - 名称: {name}
-    - 描述: {description}
-    - 性格: {personality}
+    - 名称: [[NAME]]
+    - 描述: [[DESCRIPTION]]
+    - 性格: [[PERSONALITY]]
     
-    整体风格: {style}
+    整体风格: [[STYLE]]
     
     请只输出提示词本身，不要有其他说明。
   
@@ -186,14 +186,14 @@ prompts:
     提示词应该描述场景的氛围和环境，适合作为场景参考图（不要包含具体人物）。
     
     场景信息：
-    - 名称: {name}
-    - 描述: {description}
-    - 地点: {location}
-    - 时间: {time}
+    - 名称: [[NAME]]
+    - 描述: [[DESCRIPTION]]
+    - 地点: [[LOCATION]]
+    - 时间: [[TIME]]
     
-    整体风格: {style}
+    整体风格: [[STYLE]]
     
-    请只输出提示词本身，不要有其他说明。
+    请只输出提示词本身，不要有其其他说明。
   
   shot_design: |
     你是一名专业的分镜师。请为以下场景设计分镜。

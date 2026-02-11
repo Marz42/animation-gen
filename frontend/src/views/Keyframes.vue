@@ -177,27 +177,64 @@
           :closable="false"
           style="margin-bottom: 15px;"
         />
+        <el-alert
+          title="此提示词用于指导LLM生成每个分镜的图片/视频提示词。系统会自动将分镜信息（描述、角色、场景等）传递给LLM。"
+          type="warning"
+          :closable="false"
+          style="margin-bottom: 15px;"
+        />
         <el-tabs v-model="promptActiveTab">
           <el-tab-pane label="图片提示词 (image_prompt)" name="image">
             <el-form label-position="top">
-              <el-form-item label="图片生成提示词模板">
+              <el-form-item>
+                <template #label>
+                  <span>图片生成提示词模板</span>
+                  <el-tooltip placement="top">
+                    <template #content>
+                      此模板用于指导LLM生成每个分镜的图片提示词。<br/><br/>
+                      系统会自动传入以下上下文：<br/>
+                      - 分镜描述 (shot.description)<br/>
+                      - 涉及角色及其描述<br/>
+                      - 场景描述<br/>
+                      - 镜头类型 (shot.type)<br/>
+                      - 整体风格描述<br/><br/>
+                      LLM应返回JSON格式：{&quot;positive&quot;: &quot;...&quot;, &quot;negative&quot;: &quot;...&quot;}
+                    </template>
+                    <el-icon style="margin-left: 4px; color: #909399;"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
                 <el-input 
                   v-model="promptForm.image_prompt" 
                   type="textarea" 
                   :rows="15"
-                  placeholder="输入图片生成提示词模板..."
+                  placeholder="输入图片生成提示词模板...&#10;&#10;此模板用于指导LLM生成每个分镜的正面/负面提示词。&#10;&#10;系统会自动传入以下上下文:&#10;- 分镜描述 (shot.description)&#10;- 涉及角色及其描述&#10;- 场景描述&#10;- 镜头类型 (shot.type)&#10;- 整体风格描述&#10;&#10;LLM应返回JSON格式: {&quot;positive&quot;: &quot;...&quot;, &quot;negative&quot;: &quot;...&quot;}"
                 />
               </el-form-item>
             </el-form>
           </el-tab-pane>
           <el-tab-pane label="视频提示词 (video_prompt)" name="video">
             <el-form label-position="top">
-              <el-form-item label="视频生成提示词模板">
+              <el-form-item>
+                <template #label>
+                  <span>视频生成提示词模板</span>
+                  <el-tooltip placement="top">
+                    <template #content>
+                      此模板用于指导LLM生成每个分镜的视频提示词。<br/><br/>
+                      系统会自动传入以下上下文：<br/>
+                      - 分镜描述 (shot.description)<br/>
+                      - 动作描述 (shot.action)<br/>
+                      - 镜头运动 (shot.camera_movement)<br/>
+                      - 持续时间 (shot.duration)<br/><br/>
+                      LLM应返回视频描述文本。
+                    </template>
+                    <el-icon style="margin-left: 4px; color: #909399;"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
                 <el-input 
                   v-model="promptForm.video_prompt" 
                   type="textarea" 
                   :rows="15"
-                  placeholder="输入视频生成提示词模板..."
+                  placeholder="输入视频生成提示词模板...&#10;&#10;此模板用于指导LLM生成每个分镜的视频描述。&#10;&#10;系统会自动传入以下上下文:&#10;- 分镜描述 (shot.description)&#10;- 动作描述 (shot.action)&#10;- 镜头运动 (shot.camera_movement)&#10;- 持续时间 (shot.duration)&#10;&#10;LLM应返回视频描述文本。"
                 />
               </el-form-item>
             </el-form>
@@ -217,6 +254,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { QuestionFilled, Refresh, Setting, Edit } from '@element-plus/icons-vue'
 import { shotApi, keyframeApi, promptApi } from '../api'
 import { useProjectStore } from '../stores/project'
 

@@ -130,21 +130,54 @@
 
       <!-- 提示词编辑对话框 -->
       <el-dialog v-model="showPromptDialog" title="编辑参考图提示词" width="800px">
+        <el-alert
+          title="提示词中可使用以下变量占位符来引用前阶段解析的角色/场景信息"
+          type="info"
+          :closable="false"
+          style="margin-bottom: 15px;"
+        />
         <el-form :model="prompts" label-width="120px">
-          <el-form-item label="角色提示词模板">
+          <el-form-item>
+            <template #label>
+              <span>角色提示词模板</span>
+              <el-tooltip placement="top">
+                <template #content>
+                  可用变量：<br/>
+                  [[NAME]] - 角色名称<br/>
+                  [[DESCRIPTION]] - 角色外貌描述<br/>
+                  [[PERSONALITY]] - 角色性格<br/>
+                  [[STYLE]] - 项目风格描述
+                </template>
+                <el-icon style="margin-left: 4px; color: #909399;"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </template>
             <el-input 
               v-model="prompts.character_ref_prompt" 
               type="textarea" 
-              :rows="6"
-              placeholder="使用 [[NAME]], [[DESCRIPTION]], [[PERSONALITY]], [[STYLE]] 作为变量"
+              :rows="8"
+              placeholder="编辑角色参考图生成的提示词模板...&#10;&#10;可用变量:&#10;[[NAME]] - 角色名称&#10;[[DESCRIPTION]] - 角色外貌描述&#10;[[PERSONALITY]] - 角色性格&#10;[[STYLE]] - 项目风格描述"
             />
           </el-form-item>
-          <el-form-item label="场景提示词模板">
+          <el-form-item>
+            <template #label>
+              <span>场景提示词模板</span>
+              <el-tooltip placement="top">
+                <template #content>
+                  可用变量：<br/>
+                  [[NAME]] - 场景名称<br/>
+                  [[DESCRIPTION]] - 场景描述<br/>
+                  [[LOCATION]] - 地点<br/>
+                  [[TIME]] - 时间（白天/夜晚/黄昏等）<br/>
+                  [[STYLE]] - 项目风格描述
+                </template>
+                <el-icon style="margin-left: 4px; color: #909399;"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </template>
             <el-input 
               v-model="prompts.scene_ref_prompt" 
               type="textarea" 
-              :rows="6"
-              placeholder="使用 [[NAME]], [[DESCRIPTION]], [[LOCATION]], [[TIME]], [[STYLE]] 作为变量"
+              :rows="8"
+              placeholder="编辑场景参考图生成的提示词模板...&#10;&#10;可用变量:&#10;[[NAME]] - 场景名称&#10;[[DESCRIPTION]] - 场景描述&#10;[[LOCATION]] - 地点&#10;[[TIME]] - 时间（白天/夜晚/黄昏等）&#10;[[STYLE]] - 项目风格描述"
             />
           </el-form-item>
         </el-form>
@@ -208,6 +241,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { QuestionFilled, Refresh } from '@element-plus/icons-vue'
 import { scriptApi, referenceApi } from '../api'
 import { useProjectStore } from '../stores/project'
 import axios from 'axios'

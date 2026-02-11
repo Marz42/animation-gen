@@ -55,27 +55,36 @@
           <provider-table 
             :providers="providers.llm || []" 
             type="llm"
+            :loading="loading"
+            :setting-default="settingDefault"
             @edit="editProvider"
             @delete="deleteProvider"
             @verify="verifyProvider"
+            @set-default="setDefaultProvider"
           />
         </el-tab-pane>
         <el-tab-pane label="Image" name="image">
           <provider-table 
             :providers="providers.image || []" 
             type="image"
+            :loading="loading"
+            :setting-default="settingDefault"
             @edit="editProvider"
             @delete="deleteProvider"
             @verify="verifyProvider"
+            @set-default="setDefaultProvider"
           />
         </el-tab-pane>
         <el-tab-pane label="Video" name="video">
           <provider-table 
             :providers="providers.video || []" 
             type="video"
+            :loading="loading"
+            :setting-default="settingDefault"
             @edit="editProvider"
             @delete="deleteProvider"
             @verify="verifyProvider"
+            @set-default="setDefaultProvider"
           />
         </el-tab-pane>
       </el-tabs>
@@ -189,7 +198,7 @@
 <script setup>
 import { ref, reactive, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Download, Upload, Plus, Delete } from '@element-plus/icons-vue'
+import { Download, Upload, Plus, Delete, Star, StarFilled } from '@element-plus/icons-vue'
 import { configApi, providerApi } from '../api'
 import ProviderTable from '../components/ProviderTable.vue'
 
@@ -241,6 +250,7 @@ const handleFileChange = async (file) => {
 const activeTab = ref('llm')
 const providers = ref({ llm: [], image: [], video: [] })
 const loading = ref(false)
+const settingDefault = ref(null)
 
 const loadProviders = async () => {
   loading.value = true
@@ -251,6 +261,20 @@ const loadProviders = async () => {
     ElMessage.error('获取提供商列表失败')
   } finally {
     loading.value = false
+  }
+}
+
+// 设置默认提供商
+const setDefaultProvider = async (provider) => {
+  settingDefault.value = provider.id
+  try {
+    await providerApi.setDefault(provider.id)
+    ElMessage.success(`已将 "${provider.name}" 设置为默认${provider.type.toUpperCase()}提供商`)
+    await loadProviders()
+  } catch (e) {
+    ElMessage.error('设置默认提供商失败')
+  } finally {
+    settingDefault.value = null
   }
 }
 

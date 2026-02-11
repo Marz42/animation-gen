@@ -182,11 +182,15 @@ class VideoService:
         # 接口AI Sora 2 定价（约）
         cost_per_video = 0.20  # $0.20 per 10s video
         
+        # 计算总秒数
+        seconds = int(duration.replace("s", ""))
+        total_seconds = shot_count * seconds
+        
         total_cost = shot_count * cost_per_video
         
         return {
             "shot_count": shot_count,
-            "duration": duration,
+            "total_seconds": total_seconds,
             "estimated_cost_usd": round(total_cost, 2),
             "provider": self.default_provider_type
         }

@@ -165,12 +165,11 @@ class LLMService:
             图片生成提示词
         """
         prompt_template = self.config.prompts.get("character_ref_prompt", "")
-        prompt = prompt_template.format(
-            name=character.name,
-            description=character.description,
-            personality=character.personality,
-            style=style_description
-        )
+        # 使用 replace 替换 [[占位符]] 格式
+        prompt = prompt_template.replace("[[NAME]]", character.name or "")
+        prompt = prompt.replace("[[DESCRIPTION]]", character.description or "")
+        prompt = prompt.replace("[[PERSONALITY]]", character.personality or "")
+        prompt = prompt.replace("[[STYLE]]", style_description or "")
         
         return await self.generate(prompt)
     
@@ -190,13 +189,12 @@ class LLMService:
             图片生成提示词
         """
         prompt_template = self.config.prompts.get("scene_ref_prompt", "")
-        prompt = prompt_template.format(
-            name=scene.name,
-            description=scene.description,
-            location=scene.location,
-            time=scene.time,
-            style=style_description
-        )
+        # 使用 replace 替换 [[占位符]] 格式
+        prompt = prompt_template.replace("[[NAME]]", scene.name or "")
+        prompt = prompt.replace("[[DESCRIPTION]]", scene.description or "")
+        prompt = prompt.replace("[[LOCATION]]", scene.location or "")
+        prompt = prompt.replace("[[TIME]]", scene.time or "")
+        prompt = prompt.replace("[[STYLE]]", style_description or "")
         
         return await self.generate(prompt)
     
