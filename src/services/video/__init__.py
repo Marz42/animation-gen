@@ -150,7 +150,7 @@ class VideoService:
             是否成功
         """
         import aiohttp
-        import aiofiles
+        import asyncio
         
         try:
             async with aiohttp.ClientSession() as session:
@@ -159,9 +159,14 @@ class VideoService:
                         # 确保目录存在
                         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
                         
-                        async with aiofiles.open(output_path, 'wb') as f:
-                            async for chunk in resp.content.iter_chunked(8192):
-                                await f.write(chunk)
+                        # 使用标准库写入文件（在线程中执行）
+                        chunks = []
+                        async for chunk in resp.content.iter_chunked(8192):
+                            chunks.append(chunk)
+                        
+                        # 合并并写入文件
+                        data = b''.join(chunks)
+                        await asyncio.to_thread(self._write_file, output_path, data)
                         
                         print(f"✅ 视频已下载: {output_path}")
                         return True
@@ -171,6 +176,11 @@ class VideoService:
         except Exception as e:
             print(f"❌ 下载异常: {e}")
             return False
+    
+    def _write_file(self, path: str, data: bytes):
+        """同步写入文件（在线程中执行）"""
+        with open(path, 'wb') as f:
+            f.write(data)
     
     def estimate_cost(self, shot_count: int, duration: str = "5s") -> Dict[str, Any]:
         """
