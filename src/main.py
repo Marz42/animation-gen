@@ -1832,12 +1832,27 @@ class APIProviderRequest(BaseModel):
     custom_fields: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
+def _has_user_default_provider(config: Config, provider_type: str) -> bool:
+    """检查是否有用户自定义的默认提供商"""
+    providers = config.providers.get(provider_type, [])
+    for p in providers:
+        if _get_provider_attr(p, "is_default"):
+            return True
+    return False
+
+
 def _convert_defaults_to_providers(config: Config) -> Dict[str, List[Dict]]:
     """将defaults配置转换为APIProvider格式
     
     这样可以在前端统一显示配置文件中的默认API设置
+    如果用户设置了自定义默认提供商，内置提供商的is_default将为False
     """
     builtin_providers = {"llm": [], "image": [], "video": []}
+    
+    # 检查各类型是否有用户自定义默认提供商
+    llm_has_default = _has_user_default_provider(config, "llm")
+    image_has_default = _has_user_default_provider(config, "image")
+    video_has_default = _has_user_default_provider(config, "video")
     
     # LLM 默认配置
     llm_config = config.defaults.llm
@@ -1847,7 +1862,7 @@ def _convert_defaults_to_providers(config: Config) -> Dict[str, List[Dict]]:
             "name": f"内置LLM ({llm_config.provider})",
             "type": "llm",
             "enabled": True,
-            "is_default": True,
+            "is_default": not llm_has_default,  # 只有没有用户默认时才为True
             "is_builtin": True,  # 标记为内置配置
             "base_url": llm_config.base_url,
             "model": llm_config.model,
@@ -1871,7 +1886,7 @@ def _convert_defaults_to_providers(config: Config) -> Dict[str, List[Dict]]:
             "name": f"内置Image ({image_config.provider})",
             "type": "image",
             "enabled": True,
-            "is_default": True,
+            "is_default": not image_has_default,  # 只有没有用户默认时才为True
             "is_builtin": True,
             "base_url": image_config.base_url,
             "model": None,
@@ -1895,7 +1910,7 @@ def _convert_defaults_to_providers(config: Config) -> Dict[str, List[Dict]]:
             "name": f"内置Video ({video_config.provider})",
             "type": "video",
             "enabled": True,
-            "is_default": True,
+            "is_default": not video_has_default,  # 只有没有用户默认时才为True
             "is_builtin": True,
             "base_url": video_config.base_url,
             "model": None,
@@ -1980,6 +1995,28 @@ async def add_provider(request: APIProviderRequest):
         raise HTTPException(status_code=500, detail=f"添加提供商失败: {str(e)}")
 
 
+def _get_provider_id(provider) -> str:
+    """获取提供商ID（支持字典和APIProvider对象）"""
+    if isinstance(provider, dict):
+        return provider.get("id")
+    return getattr(provider, "id", None)
+
+
+def _get_provider_attr(provider, attr: str, default=None):
+    """获取提供商属性（支持字典和APIProvider对象）"""
+    if isinstance(provider, dict):
+        return provider.get(attr, default)
+    return getattr(provider, attr, default)
+
+
+def _set_provider_attr(provider, attr: str, value):
+    """设置提供商属性（支持字典和APIProvider对象）"""
+    if isinstance(provider, dict):
+        provider[attr] = value
+    else:
+        setattr(provider, attr, value)
+
+
 @app.put("/api/providers/{provider_id}")
 async def update_provider(provider_id: str, request: APIProviderRequest):
     """更新提供商"""
@@ -1990,28 +2027,20 @@ async def update_provider(provider_id: str, request: APIProviderRequest):
         found = False
         for provider_type, providers in config.providers.items():
             for i, provider in enumerate(providers):
-                if isinstance(provider, dict) and provider.get("id") == provider_id:
+                if _get_provider_id(provider) == provider_id:
                     # 更新字段
                     from datetime import datetime
-                    updated_provider = {
-                        "id": provider_id,
-                        "name": request.name,
-                        "type": request.type,
-                        "enabled": request.enabled,
-                        "base_url": request.base_url,
-                        "api_key": request.api_key,
-                        "model": request.model,
-                        "endpoint": request.endpoint,
-                        "headers": request.headers or {},
-                        "timeout": request.timeout,
-                        "custom_fields": request.custom_fields or {},
-                        "created_at": provider.get("created_at"),
-                        "updated_at": datetime.now().isoformat(),
-                        "verified": provider.get("verified"),
-                        "verified_at": provider.get("verified_at"),
-                        "latency": provider.get("latency"),
-                    }
-                    providers[i] = updated_provider
+                    _set_provider_attr(provider, "name", request.name)
+                    _set_provider_attr(provider, "type", request.type)
+                    _set_provider_attr(provider, "enabled", request.enabled)
+                    _set_provider_attr(provider, "base_url", request.base_url)
+                    _set_provider_attr(provider, "api_key", request.api_key)
+                    _set_provider_attr(provider, "model", request.model)
+                    _set_provider_attr(provider, "endpoint", request.endpoint)
+                    _set_provider_attr(provider, "headers", request.headers or {})
+                    _set_provider_attr(provider, "timeout", request.timeout)
+                    _set_provider_attr(provider, "custom_fields", request.custom_fields or {})
+                    _set_provider_attr(provider, "updated_at", datetime.now().isoformat())
                     found = True
                     break
             if found:
@@ -2038,7 +2067,7 @@ async def delete_provider(provider_id: str):
         found = False
         for provider_type, providers in config.providers.items():
             for i, provider in enumerate(providers):
-                if isinstance(provider, dict) and provider.get("id") == provider_id:
+                if _get_provider_id(provider) == provider_id:
                     providers.pop(i)
                     found = True
                     break
@@ -2196,9 +2225,9 @@ async def verify_provider(provider_id: str):
             # 查找用户添加的提供商
             for provider_type, providers in config.providers.items():
                 for p in providers:
-                    if isinstance(p, dict) and p.get("id") == provider_id:
+                    if _get_provider_id(p) == provider_id:
                         provider = p
-                        provider["_type"] = provider_type
+                        _set_provider_attr(provider, "_type", provider_type)
                         break
                 if provider:
                     break
@@ -2206,10 +2235,10 @@ async def verify_provider(provider_id: str):
         if not provider:
             raise HTTPException(status_code=404, detail="提供商不存在")
         
-        provider_type = provider.get("type") or provider.get("_type", "llm")
-        base_url = provider.get("base_url", "")
-        api_key = provider.get("api_key", "")
-        model = provider.get("model")
+        provider_type = _get_provider_attr(provider, "type") or _get_provider_attr(provider, "_type", "llm")
+        base_url = _get_provider_attr(provider, "base_url", "")
+        api_key = _get_provider_attr(provider, "api_key", "")
+        model = _get_provider_attr(provider, "model")
         
         latency = int((time.time() - start_time) * 1000)
         
@@ -2222,7 +2251,7 @@ async def verify_provider(provider_id: str):
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {api_key}"
                 }
-                headers.update(provider.get("headers", {}))
+                headers.update(_get_provider_attr(provider, "headers", {}))
                 
                 payload = {
                     "model": model or "gpt-3.5-turbo",
@@ -2241,9 +2270,9 @@ async def verify_provider(provider_id: str):
                             latency = int((time.time() - start_time) * 1000)
                             # 更新验证状态（仅对非内置提供商保存）
                             if not is_builtin:
-                                provider["verified"] = True
-                                provider["verified_at"] = datetime.now().isoformat()
-                                provider["latency"] = latency
+                                _set_provider_attr(provider, "verified", True)
+                                _set_provider_attr(provider, "verified_at", datetime.now().isoformat())
+                                _set_provider_attr(provider, "latency", latency)
                                 config.save_global_config(use_json=True)
                             return {"valid": True, "latency": latency}
                         else:
@@ -2276,9 +2305,9 @@ async def verify_provider(provider_id: str):
                     latency = int((time.time() - start_time) * 1000)
                     # 仅对非内置提供商保存验证状态
                     if not is_builtin:
-                        provider["verified"] = True
-                        provider["verified_at"] = datetime.now().isoformat()
-                        provider["latency"] = latency
+                        _set_provider_attr(provider, "verified", True)
+                        _set_provider_attr(provider, "verified_at", datetime.now().isoformat())
+                        _set_provider_attr(provider, "latency", latency)
                         config.save_global_config(use_json=True)
                     return {"valid": True, "latency": latency, "note": "基础连接验证通过"}
             except Exception as e:
@@ -2293,9 +2322,9 @@ async def verify_provider(provider_id: str):
                 latency = int((time.time() - start_time) * 1000)
                 # 仅对非内置提供商保存验证状态
                 if not is_builtin:
-                    provider["verified"] = True
-                    provider["verified_at"] = datetime.now().isoformat()
-                    provider["latency"] = latency
+                    _set_provider_attr(provider, "verified", True)
+                    _set_provider_attr(provider, "verified_at", datetime.now().isoformat())
+                    _set_provider_attr(provider, "latency", latency)
                     config.save_global_config(use_json=True)
                 return {"valid": True, "latency": latency, "note": "基础配置验证通过"}
             except Exception as e:
@@ -2324,12 +2353,12 @@ async def get_default_provider(provider_type: str):
         
         # 查找默认提供商
         for provider in providers:
-            if isinstance(provider, dict) and provider.get("is_default"):
+            if _get_provider_attr(provider, "is_default"):
                 return provider
         
         # 如果没有默认提供商，返回第一个启用的提供商
         for provider in providers:
-            if isinstance(provider, dict) and provider.get("enabled", True):
+            if _get_provider_attr(provider, "enabled", True):
                 return provider
         
         return None
@@ -2341,23 +2370,39 @@ async def get_default_provider(provider_type: str):
 
 @app.post("/api/providers/{provider_id}/set-default")
 async def set_default_provider(provider_id: str):
-    """设置默认提供商"""
+    """设置默认提供商（支持内置提供商和用户自定义提供商）"""
     try:
         config = Config.load_global()
         
-        # 查找提供商并设置为默认
+        # 处理内置提供商
+        builtin_type_map = {
+            "builtin_llm": "llm",
+            "builtin_image": "image",
+            "builtin_video": "video"
+        }
+        
+        if provider_id in builtin_type_map:
+            # 内置提供商：只需将该类型的所有用户自定义提供商设为非默认
+            provider_type = builtin_type_map[provider_id]
+            providers = config.providers.get(provider_type, [])
+            for p in providers:
+                _set_provider_attr(p, "is_default", False)
+            
+            config.save_global_config(use_json=True)
+            return {"status": "success", "message": f"已恢复为系统默认{provider_type.upper()}提供商"}
+        
+        # 查找用户自定义提供商
         found = False
         provider_type = None
         
         for ptype, providers in config.providers.items():
             for provider in providers:
-                if isinstance(provider, dict) and provider.get("id") == provider_id:
+                if _get_provider_id(provider) == provider_id:
                     # 将同类型的其他提供商设置为非默认
                     for p in providers:
-                        if isinstance(p, dict):
-                            p["is_default"] = False
+                        _set_provider_attr(p, "is_default", False)
                     # 设置当前提供商为默认
-                    provider["is_default"] = True
+                    _set_provider_attr(provider, "is_default", True)
                     found = True
                     provider_type = ptype
                     break

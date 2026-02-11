@@ -75,26 +75,28 @@
       
       <el-table-column label="操作" width="280" fixed="right">
         <template #default="{ row }">
-          <!-- 内置提供商显示特殊提示 -->
-          <el-tooltip v-if="row.is_builtin" content="内置提供商来自配置文件，请在配置文件中修改" placement="top">
-            <el-tag type="info" size="small" effect="plain">配置文件</el-tag>
-          </el-tooltip>
+          <!-- 设为默认按钮（内置和非内置都显示，只要不是当前默认） -->
+          <el-button 
+            v-if="!row.is_default && row.enabled" 
+            type="warning" 
+            size="small" 
+            @click="$emit('setDefault', row)"
+            :loading="settingDefault === row.id"
+          >
+            <el-icon><Star /></el-icon> 
+            {{ row.is_builtin ? '恢复默认' : '设为默认' }}
+          </el-button>
           
-          <!-- 非内置提供商的操作按钮 -->
-          <template v-else>
-            <el-button 
-              v-if="!row.is_default && row.enabled" 
-              type="warning" 
-              size="small" 
-              @click="$emit('setDefault', row)"
-              :loading="settingDefault === row.id"
-            >
-              <el-icon><Star /></el-icon> 设为默认
-            </el-button>
-            <el-tag v-else-if="row.is_default" type="success" size="small" effect="plain">
-              <el-icon><StarFilled /></el-icon> 当前默认
-            </el-tag>
-          </template>
+          <!-- 当前默认标识 -->
+          <el-tag v-else-if="row.is_default" type="success" size="small" effect="plain">
+            <el-icon><StarFilled /></el-icon> 
+            {{ row.is_builtin ? '系统默认' : '当前默认' }}
+          </el-tag>
+          
+          <!-- 内置提供商提示 -->
+          <el-tooltip v-if="row.is_builtin" content="内置提供商来自默认配置" placement="top">
+            <el-tag type="info" size="small" effect="plain" style="margin-left: 5px;">内置</el-tag>
+          </el-tooltip>
           
           <el-button 
             type="primary" 
