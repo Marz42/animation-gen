@@ -68,19 +68,16 @@ class VideoMonitorService:
         # 获取所有项目
         projects = project_manager.list_projects()
         
-        for project_info in projects:
+        for project in projects:
             try:
-                project = project_manager.load_project(project_info["project_id"])
-                if not project:
-                    continue
-                
+                # project 已经是 Project 对象，不需要再加载
                 shots = project_manager.load_shots(project)
                 
                 for shot in shots:
                     await self._check_shot_videos(project, shot)
                     
             except Exception as e:
-                print(f"❌ 检查项目 {project_info.get('project_id')} 失败: {e}")
+                print(f"❌ 检查项目 {project.project_id if hasattr(project, 'project_id') else 'unknown'} 失败: {e}")
     
     async def _check_shot_videos(self, project, shot):
         """检查单个分镜的视频状态"""
