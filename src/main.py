@@ -2249,6 +2249,103 @@ class ParseCurlRequest(BaseModel):
     curl_command: str
 
 
+def _generate_generic_provider_config(parsed_result: dict, data_json: dict) -> dict:
+    """
+    根据解析的CURL命令生成通用提供商配置
+    
+    自动生成 request_template, parameter_mapping, response_parser, status_query
+    """
+    import json
+    
+    base_url = parsed_result.get("base_url", "")
+    endpoint = parsed_result.get("endpoint", "")
+    headers = parsed_result.get("headers", {})
+    method = parsed_result.get("method", "POST")
+    
+    # 构建请求模板
+    request_template = {
+        "url": f"{base_url}{endpoint}" if base_url and endpoint else f"{base_url}/v3/async/sora-2-video-reverse",
+        "method": method,
+        "headers": {}
+    }
+    
+    # 处理 headers，替换敏感信息为模板变量
+    for key, value in headers.items():
+        if key.lower() in ["authorization", "x-api-key"]:
+            # API key 替换为模板变量
+            request_template["headers"][key] = "Bearer {{api_key}}" if "Bearer" in value else "{{api_key}}"
+        else:
+            request_template["headers"][key] = value
+    
+    # 构建 body 模板
+    body_template_dict = {}
+    parameter_mapping = {
+        "duration": {},
+        "resolution": {}
+    }
+    
+    for key, value in data_json.items():
+        if key == "prompt":
+            body_template_dict[key] = "{{prompt}}"
+        elif key == "image":
+            body_template_dict[key] = "{{image_base64}}"
+        elif key == "duration":
+            body_template_dict[key] = "{{duration}}"
+            # 推断 duration 映射
+            if isinstance(value, int):
+                if value <= 5:
+                    parameter_mapping["duration"] = {"4s": value}
+                elif value <= 10:
+                    parameter_mapping["duration"] = {"10s": value}
+                else:
+                    parameter_mapping["duration"] = {"15s": value}
+        elif key == "size":
+            body_template_dict[key] = "{{resolution}}"
+            # 推断 resolution 映射
+            if isinstance(value, str):
+                if "720" in value or "1080" in value:
+                    parameter_mapping["resolution"] = {
+                        "720p": value,
+                        "1080p": value.replace("720", "1080") if "720" in value else value
+                    }
+        elif key == "watermark":
+            body_template_dict[key] = "{{watermark}}"
+        elif key in ["character_url", "character_timestamps"]:
+            # 可选字段，保留原值或设为空
+            body_template_dict[key] = ""
+        else:
+            body_template_dict[key] = value
+    
+    request_template["body_template"] = json.dumps(body_template_dict, indent=2, ensure_ascii=False)
+    
+    # 构建响应解析器（基于常见API格式推断）
+    response_parser = {
+        "task_id_path": "task_id",
+        "status_path": "status",
+        "video_url_path": "videos.0.video_url",
+        "error_path": "reason"
+    }
+    
+    # 构建状态查询配置
+    status_query = {
+        "url": f"{base_url}/v3/async/task-result?task_id={{{{task_id}}}}",
+        "method": "GET",
+        "status_mapping": {
+            "TASK_STATUS_PENDING": "submitted",
+            "TASK_STATUS_PROCESSING": "processing",
+            "TASK_STATUS_SUCCEED": "completed",
+            "TASK_STATUS_FAILED": "failed"
+        }
+    }
+    
+    return {
+        "request_template": request_template,
+        "parameter_mapping": parameter_mapping,
+        "response_parser": response_parser,
+        "status_query": status_query
+    }
+
+
 @app.post("/api/providers/parse-curl")
 async def parse_curl(request: ParseCurlRequest):
     """解析CURL命令，返回解析后的字段"""
@@ -2263,7 +2360,8 @@ async def parse_curl(request: ParseCurlRequest):
             "headers": {},
             "model": None,
             "api_key": None,
-            "method": "GET"
+            "method": "GET",
+            "custom_fields": None
         }
         
         # 解析URL (支持 --url 和直接跟在curl后面的URL)
@@ -2317,8 +2415,16 @@ async def parse_curl(request: ParseCurlRequest):
                 data_str = data_match.group(1).strip()
                 # 尝试解析JSON
                 data_json = json.loads(data_str)
+                
+                # 提取model（LLM提供商用）
                 if "model" in data_json:
                     result["model"] = data_json["model"]
+                
+                # 生成通用提供商配置（视频提供商用）
+                if result["method"] == "POST" and ("prompt" in data_json or "image" in data_json):
+                    result["custom_fields"] = _generate_generic_provider_config(
+                        result, data_json
+                    )
             except Exception as e:
                 # JSON解析失败，忽略
                 pass
