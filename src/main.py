@@ -9,6 +9,7 @@ import asyncio
 import shutil
 import logging
 import yaml
+import random
 from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -40,6 +41,7 @@ from src.services.image_service import ImageService
 from src.services.video import VideoService
 from src.services.shot_design_service import ShotDesignService
 from src.services.video_monitor import get_video_monitor
+from src.services.batch_pipeline import get_batch_pipeline_service, BatchJob, BatchTaskStatus
 
 
 # 全局实例
@@ -65,6 +67,10 @@ async def lifespan(app: FastAPI):
     video_monitor = get_video_monitor()
     await video_monitor.start()
     
+    # 启动批量流水线服务
+    batch_pipeline = get_batch_pipeline_service()
+    await batch_pipeline.start()
+    
     # 恢复僵尸任务
     for project in project_manager.list_projects():
         recovered = project_manager.recover_zombie_tasks(project, timeout_seconds=300)
@@ -75,6 +81,10 @@ async def lifespan(app: FastAPI):
     
     # 关闭时
     print("🛑 关闭动画生成系统...")
+    
+    # 停止批量流水线服务
+    batch_pipeline = get_batch_pipeline_service()
+    await batch_pipeline.stop()
     
     # 停止视频状态监控服务
     video_monitor = get_video_monitor()
@@ -2684,6 +2694,200 @@ async def set_default_provider(provider_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"设置默认提供商失败: {str(e)}")
+
+
+# ============ 批量流水线API ============
+
+class CreateBatchJobRequest(BaseModel):
+    """创建批量作业请求"""
+    shot_ids: List[str]
+    name: Optional[str] = None
+    duration: str = "4s"
+    size: str = "720p"
+    watermark: bool = False
+    provider: Optional[str] = None
+    auto_retry: bool = True
+    sequential: bool = False  # False=并行, True=顺序
+    max_parallel: int = 2
+
+
+class BatchJobResponse(BaseModel):
+    """批量作业响应"""
+    job_id: str
+    name: str
+    project_id: str
+    status: str
+    total_tasks: int
+    completed_count: int
+    failed_count: int
+    progress_percentage: float
+    created_at: str
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+
+
+@app.post("/api/projects/{project_id}/batch-jobs", response_model=BatchJobResponse)
+async def create_batch_job(project_id: str, request: CreateBatchJobRequest):
+    """
+    创建批量生成作业（无人值守）
+    
+    自动处理：首帧生成 → 等待完成 → 视频生成 → 下载
+    """
+    project = project_manager.load_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    
+    if not request.shot_ids:
+        raise HTTPException(status_code=400, detail="shot_ids 不能为空")
+    
+    try:
+        batch_service = get_batch_pipeline_service()
+        job = await batch_service.create_batch_job(
+            project_id=project_id,
+            shot_ids=request.shot_ids,
+            name=request.name,
+            duration=request.duration,
+            size=request.size,
+            watermark=request.watermark,
+            provider=request.provider,
+            auto_retry=request.auto_retry,
+            sequential=request.sequential,
+            max_parallel=request.max_parallel
+        )
+        
+        return BatchJobResponse(
+            job_id=job.job_id,
+            name=job.name,
+            project_id=job.project_id,
+            status=job.status,
+            total_tasks=job.total_tasks,
+            completed_count=job.completed_count,
+            failed_count=job.failed_count,
+            progress_percentage=job.progress_percentage,
+            created_at=job.created_at.isoformat(),
+            started_at=job.started_at.isoformat() if job.started_at else None,
+            completed_at=job.completed_at.isoformat() if job.completed_at else None
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建批量作业失败: {str(e)}")
+
+
+@app.get("/api/projects/{project_id}/batch-jobs")
+async def list_batch_jobs(project_id: str):
+    """列出项目的所有批量作业"""
+    batch_service = get_batch_pipeline_service()
+    jobs = batch_service.list_jobs(project_id=project_id)
+    
+    return [
+        {
+            "job_id": job.job_id,
+            "name": job.name,
+            "status": job.status,
+            "total_tasks": job.total_tasks,
+            "completed_count": job.completed_count,
+            "failed_count": job.failed_count,
+            "progress_percentage": job.progress_percentage,
+            "created_at": job.created_at.isoformat(),
+            "started_at": job.started_at.isoformat() if job.started_at else None,
+            "completed_at": job.completed_at.isoformat() if job.completed_at else None
+        }
+        for job in jobs
+    ]
+
+
+@app.get("/api/projects/{project_id}/batch-jobs/{job_id}")
+async def get_batch_job(project_id: str, job_id: str):
+    """获取批量作业详情"""
+    batch_service = get_batch_pipeline_service()
+    job = batch_service.get_job(job_id)
+    
+    if not job or job.project_id != project_id:
+        raise HTTPException(status_code=404, detail="作业不存在")
+    
+    return {
+        "job_id": job.job_id,
+        "name": job.name,
+        "project_id": job.project_id,
+        "status": job.status,
+        "total_tasks": job.total_tasks,
+        "completed_count": job.completed_count,
+        "failed_count": job.failed_count,
+        "progress_percentage": job.progress_percentage,
+        "auto_retry": job.auto_retry,
+        "sequential": job.sequential,
+        "max_parallel": job.max_parallel,
+        "tasks": [
+            {
+                "task_id": task.task_id,
+                "shot_id": task.shot_id,
+                "sequence": task.sequence,
+                "status": task.status.value,
+                "keyframe_attempts": task.keyframe_attempts,
+                "video_attempts": task.video_attempts,
+                "keyframe_error": task.keyframe_error,
+                "video_error": task.video_error,
+                "video_task_id": task.video_task_id,
+                "duration": task.duration,
+                "size": task.size,
+                "created_at": task.created_at.isoformat(),
+                "started_at": task.started_at.isoformat() if task.started_at else None,
+                "keyframe_completed_at": task.keyframe_completed_at.isoformat() if task.keyframe_completed_at else None,
+                "video_completed_at": task.video_completed_at.isoformat() if task.video_completed_at else None
+            }
+            for task in job.tasks
+        ],
+        "created_at": job.created_at.isoformat(),
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None
+    }
+
+
+@app.post("/api/projects/{project_id}/batch-jobs/{job_id}/pause")
+async def pause_batch_job(project_id: str, job_id: str):
+    """暂停批量作业"""
+    batch_service = get_batch_pipeline_service()
+    job = batch_service.get_job(job_id)
+    
+    if not job or job.project_id != project_id:
+        raise HTTPException(status_code=404, detail="作业不存在")
+    
+    success = await batch_service.pause_job(job_id)
+    if success:
+        return {"status": "paused"}
+    raise HTTPException(status_code=400, detail="无法暂停作业")
+
+
+@app.post("/api/projects/{project_id}/batch-jobs/{job_id}/resume")
+async def resume_batch_job(project_id: str, job_id: str):
+    """恢复批量作业"""
+    batch_service = get_batch_pipeline_service()
+    job = batch_service.get_job(job_id)
+    
+    if not job or job.project_id != project_id:
+        raise HTTPException(status_code=404, detail="作业不存在")
+    
+    success = await batch_service.resume_job(job_id)
+    if success:
+        return {"status": "resumed"}
+    raise HTTPException(status_code=400, detail="无法恢复作业")
+
+
+@app.post("/api/projects/{project_id}/batch-jobs/{job_id}/cancel")
+async def cancel_batch_job(project_id: str, job_id: str):
+    """取消批量作业"""
+    batch_service = get_batch_pipeline_service()
+    job = batch_service.get_job(job_id)
+    
+    if not job or job.project_id != project_id:
+        raise HTTPException(status_code=404, detail="作业不存在")
+    
+    success = await batch_service.cancel_job(job_id)
+    if success:
+        return {"status": "cancelled"}
+    raise HTTPException(status_code=400, detail="无法取消作业")
 
 
 # ============ 主入口 ============

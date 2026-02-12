@@ -1,6 +1,37 @@
 # 更新日志 (Changelog)
 
-## [Unreleased] - 2026-02-11
+## [Unreleased] - 2026-02-12
+
+### 🚨 紧急修复
+
+#### 代码级 Bug 修复
+- ✅ 修复 `src/main.py` 缺失 `import random` - 导致视频页重新生成首帧失败
+
+### 🔥 新增功能：无人值守批量生成流水线
+
+#### BatchPipelineService - 批量生成流水线服务
+- ✅ 自动处理首帧生成 → 视频生成的依赖关系
+- ✅ 支持失败自动重试（指数退避策略）
+- ✅ 支持顺序或并行执行模式（可配置最大并行数）
+- ✅ 任务状态持久化（服务重启后可恢复未完成作业）
+- ✅ 批量任务进度实时监控
+
+#### 新增 API 端点
+```
+POST /api/projects/{id}/batch-jobs       # 创建批量作业
+GET  /api/projects/{id}/batch-jobs       # 列出名业作业
+GET  /api/projects/{id}/batch-jobs/{jid} # 获取作业详情
+POST /api/projects/{id}/batch-jobs/{jid}/pause   # 暂停作业
+POST /api/projects/{id}/batch-jobs/{jid}/resume  # 恢复作业
+POST /api/projects/{id}/batch-jobs/{jid}/cancel  # 取消作业
+```
+
+#### 批量作业功能特性
+- **自动依赖管理**: 自动等待首帧完成后再提交视频任务
+- **智能重试**: 首帧和视频分别配置最大重试次数（默认3次）
+- **指数退避**: 失败重试间隔随次数增加（2^n 秒）
+- **持久化存储**: 作业状态保存到 `~/.animation_gen/batch_jobs/`
+- **服务恢复**: 启动时自动恢复未完成的批量作业
 
 ### 修复 (基础功能)
 
