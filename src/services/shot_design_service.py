@@ -47,12 +47,12 @@ class ShotDesignService:
         # 构建提示词（使用 replace 避免 format 的 KeyError 问题）
         prompt_template = self.config.prompts.get("shot_design", "")
         
-        # 安全替换占位符
+        # 安全替换占位符（统一使用 [[VAR]] 格式）
         replacements = {
-            "{scene_name}": scene.name,
-            "{scene_description}": scene.description,
-            "{characters}": char_info,
-            "{script_segment}": script_segment
+            "[[SCENE_NAME]]": scene.name,
+            "[[SCENE_DESCRIPTION]]": scene.description,
+            "[[CHARACTERS]]": char_info,
+            "[[SCRIPT_SEGMENT]]": script_segment
         }
         
         prompt = prompt_template
@@ -72,7 +72,26 @@ class ShotDesignService:
         
         # 构建Shot对象
         shots = []
+        scene_character_ids = {c.character_id for c in characters}  # 场景所有角色ID集合
+        
         for i, shot_data in enumerate(shots_data):
+            # 获取该分镜涉及的角色ID
+            shot_character_ids = shot_data.get("character_ids", [])
+            
+            # 过滤：只保留实际属于该场景的角色ID
+            # （LLM可能返回错误或多余的ID）
+            valid_character_ids = [
+                cid for cid in shot_character_ids 
+                if cid in scene_character_ids
+            ]
+            
+            # 如果没有返回有效角色，默认使用该场景所有角色（兼容旧逻辑）
+            if not valid_character_ids:
+                valid_character_ids = [c.character_id for c in characters]
+                print(f"⚠️ 分镜 {scene.scene_id}_shot_{i+1:03d} 未返回有效character_ids，使用场景所有角色")
+            else:
+                print(f"✅ 分镜 {scene.scene_id}_shot_{i+1:03d} 涉及角色: {valid_character_ids}")
+            
             shot = Shot(
                 shot_id=f"{scene.scene_id}_shot_{i+1:03d}",
                 scene_id=scene.scene_id,
@@ -83,7 +102,7 @@ class ShotDesignService:
                 description=shot_data.get("description", ""),
                 action=shot_data.get("action", ""),
                 dialogue=shot_data.get("dialogue"),
-                characters=[c.character_id for c in characters]
+                characters=valid_character_ids
             )
             shots.append(shot)
         

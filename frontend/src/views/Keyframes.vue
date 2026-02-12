@@ -191,14 +191,16 @@
                   <span>图片生成提示词模板</span>
                   <el-tooltip placement="top">
                     <template #content>
-                      此模板用于指导LLM生成每个分镜的图片提示词。<br/><br/>
-                      系统会自动传入以下上下文：<br/>
-                      - 分镜描述 (shot.description)<br/>
-                      - 涉及角色及其描述<br/>
-                      - 场景描述<br/>
-                      - 镜头类型 (shot.type)<br/>
-                      - 整体风格描述<br/><br/>
-                      LLM应返回JSON格式：{&quot;positive&quot;: &quot;...&quot;, &quot;negative&quot;: &quot;...&quot;}
+                      <div style="max-width: 350px;">
+                        <b>此模板用于指导LLM生成每个分镜的图片提示词</b><br/><br/>
+                        <b>可用占位符变量：</b><br/>
+                        [[SHOT_DESCRIPTION]] - 分镜描述<br/>
+                        [[CHARACTERS]] - 涉及角色及其描述<br/>
+                        [[SCENE_REF]] - 场景描述<br/>
+                        [[STYLE]] - 整体风格描述<br/><br/>
+                        <b>LLM应返回JSON格式：</b><br/>
+                        {&quot;positive&quot;: &quot;...&quot;, &quot;negative&quot;: &quot;...&quot;}
+                      </div>
                     </template>
                     <el-icon style="margin-left: 4px; color: #909399;"><QuestionFilled /></el-icon>
                   </el-tooltip>
@@ -207,7 +209,7 @@
                   v-model="promptForm.image_prompt" 
                   type="textarea" 
                   :rows="15"
-                  placeholder="输入图片生成提示词模板...&#10;&#10;此模板用于指导LLM生成每个分镜的正面/负面提示词。&#10;&#10;系统会自动传入以下上下文:&#10;- 分镜描述 (shot.description)&#10;- 涉及角色及其描述&#10;- 场景描述&#10;- 镜头类型 (shot.type)&#10;- 整体风格描述&#10;&#10;LLM应返回JSON格式: {&quot;positive&quot;: &quot;...&quot;, &quot;negative&quot;: &quot;...&quot;}"
+                  placeholder="输入图片生成提示词模板...&#10;&#10;可用占位符变量:&#10;[[SHOT_DESCRIPTION]] - 分镜描述&#10;[[CHARACTERS]] - 涉及角色及其描述&#10;[[SCENE_REF]] - 场景描述&#10;[[STYLE]] - 整体风格描述&#10;&#10;LLM应返回JSON格式: {&quot;positive&quot;: &quot;...&quot;, &quot;negative&quot;: &quot;...&quot;}&#10;&#10;提示: 使用双括号格式 [[VARIABLE]] 来插入变量"
                 />
               </el-form-item>
             </el-form>
@@ -219,13 +221,17 @@
                   <span>视频生成提示词模板</span>
                   <el-tooltip placement="top">
                     <template #content>
-                      此模板用于指导LLM生成每个分镜的视频提示词。<br/><br/>
-                      系统会自动传入以下上下文：<br/>
-                      - 分镜描述 (shot.description)<br/>
-                      - 动作描述 (shot.action)<br/>
-                      - 镜头运动 (shot.camera_movement)<br/>
-                      - 持续时间 (shot.duration)<br/><br/>
-                      LLM应返回视频描述文本。
+                      <div style="max-width: 350px;">
+                        <b>此模板用于指导LLM生成每个分镜的视频提示词</b><br/><br/>
+                        <b>可用占位符变量：</b><br/>
+                        [[SCENE_DESCRIPTION]] - 剧本场景描述<br/>
+                        [[IMAGE_PROMPT]] - 首帧图片提示词<br/>
+                        [[CHARACTERS]] - 角色信息<br/>
+                        [[ACTION]] - 分镜动作描述<br/>
+                        [[CAMERA_MOVEMENT]] - 镜头运动<br/>
+                        [[DURATION]] - 持续时间<br/><br/>
+                        <b>LLM应返回：</b>视频描述文本
+                      </div>
                     </template>
                     <el-icon style="margin-left: 4px; color: #909399;"><QuestionFilled /></el-icon>
                   </el-tooltip>
@@ -234,7 +240,7 @@
                   v-model="promptForm.video_prompt" 
                   type="textarea" 
                   :rows="15"
-                  placeholder="输入视频生成提示词模板...&#10;&#10;此模板用于指导LLM生成每个分镜的视频描述。&#10;&#10;系统会自动传入以下上下文:&#10;- 分镜描述 (shot.description)&#10;- 动作描述 (shot.action)&#10;- 镜头运动 (shot.camera_movement)&#10;- 持续时间 (shot.duration)&#10;&#10;LLM应返回视频描述文本。"
+                  placeholder="输入视频生成提示词模板...&#10;&#10;可用占位符变量:&#10;[[SCENE_DESCRIPTION]] - 剧本场景描述&#10;[[IMAGE_PROMPT]] - 首帧图片提示词&#10;[[CHARACTERS]] - 角色信息&#10;[[ACTION]] - 分镜动作描述&#10;[[CAMERA_MOVEMENT]] - 镜头运动&#10;[[DURATION]] - 持续时间&#10;&#10;LLM应返回视频描述文本。&#10;&#10;提示: 使用双括号格式 [[VARIABLE]] 来插入变量"
                 />
               </el-form-item>
             </el-form>

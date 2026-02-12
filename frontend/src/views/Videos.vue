@@ -34,8 +34,11 @@
           >
             <template #default>
               <div class="batch-buttons">
-                <el-button type="primary" size="small" @click="generateVideoPromptsForSelected">
+                <el-button type="primary" size="small" @click="generateVideoPromptsForSelected" :loading="generatingPrompt === 'batch'">
                   生成视频Prompt
+                </el-button>
+                <el-button type="info" size="small" @click="regenerateVideoPromptsForSelected" :loading="regeneratingPrompt === 'batch'">
+                  重新生成
                 </el-button>
                 <el-button type="success" size="small" @click="generateVideosForSelected">
                   生成视频
@@ -54,6 +57,19 @@
               </div>
             </template>
           </el-alert>
+        </div>
+
+        <!-- 全选操作栏 -->
+        <div class="select-all-bar" v-else-if="videos.length > 0">
+          <el-button type="primary" link @click="selectAll">
+            <el-icon><Select /></el-icon> 全选 ({{ videos.length }}个)
+          </el-button>
+          <el-button type="info" link @click="selectAllWithPrompt">
+            选择有Prompt的 ({{ videos.filter(v => v.video_prompt).length }}个)
+          </el-button>
+          <el-button type="info" link @click="selectAllWithoutPrompt">
+            选择无Prompt的 ({{ videos.filter(v => !v.video_prompt).length }}个)
+          </el-button>
         </div>
 
         <!-- 生成参数设置 -->
@@ -429,7 +445,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Setting, VideoPlay, Download } from '@element-plus/icons-vue'
+import { Refresh, Setting, VideoPlay, Download, Select } from '@element-plus/icons-vue'
 import { videoApi, promptApi, shotApi } from '../api'
 import { useProjectStore } from '../stores/project'
 
@@ -438,6 +454,7 @@ const videos = ref([])
 const loading = ref(false)
 const generating = ref(false)
 const generatingPrompt = ref(null)
+const regeneratingPrompt = ref(null)
 const selectedShots = ref([])
 const downloading = ref(false)
 
@@ -620,6 +637,21 @@ const toggleSelection = (shotId) => {
 
 const clearSelection = () => {
   selectedShots.value = []
+}
+
+const selectAll = () => {
+  selectedShots.value = videos.value.map(v => v.shot_id)
+  ElMessage.success(`已选择 ${selectedShots.value.length} 个分镜`)
+}
+
+const selectAllWithPrompt = () => {
+  selectedShots.value = videos.value.filter(v => v.video_prompt).map(v => v.shot_id)
+  ElMessage.success(`已选择 ${selectedShots.value.length} 个有Prompt的分镜`)
+}
+
+const selectAllWithoutPrompt = () => {
+  selectedShots.value = videos.value.filter(v => !v.video_prompt).map(v => v.shot_id)
+  ElMessage.success(`已选择 ${selectedShots.value.length} 个无Prompt的分镜`)
 }
 
 // 数据获取
@@ -871,26 +903,99 @@ const saveVideoPrompt = async () => {
   }
 }
 
+// 为选中的分镜生成视频Prompt（只生成没有的）
 const generateVideoPromptsForSelected = async () => {
   if (selectedShots.value.length === 0) {
     ElMessage.warning('请先选择分镜')
     return
   }
   
+  // 统计没有Prompt的分镜
+  const missingPromptShots = selectedShots.value.filter(shotId => {
+    const video = videos.value.find(v => v.shot_id === shotId)
+    return video && !video.video_prompt
+  })
+  
+  if (missingPromptShots.length === 0) {
+    ElMessage.info('选中的分镜都已存在视频Prompt，如需重新生成请使用"重新生成"按钮')
+    return
+  }
+  
   generatingPrompt.value = 'batch'
+  let successCount = 0
+  let failCount = 0
+  
   try {
-    for (const shotId of selectedShots.value) {
-      const video = videos.value.find(v => v.shot_id === shotId)
-      if (video && !video.video_prompt) {
+    for (const shotId of missingPromptShots) {
+      try {
         await videoApi.generateVideoPrompt(projectStore.projectId, shotId, { use_template: true })
+        successCount++
+      } catch (e) {
+        console.error(`生成 ${shotId} 的Prompt失败:`, e)
+        failCount++
       }
     }
-    ElMessage.success('视频Prompt批量生成完成')
+    
+    if (successCount > 0) {
+      ElMessage.success(`成功生成 ${successCount} 个视频Prompt`)
+    }
+    if (failCount > 0) {
+      ElMessage.warning(`${failCount} 个生成失败`)
+    }
+    
     fetchData()
   } catch (e) {
-    ElMessage.error('部分生成失败')
+    ElMessage.error('生成过程出错')
   } finally {
     generatingPrompt.value = null
+  }
+}
+
+// 重新生成选中的分镜的视频Prompt（覆盖已有）
+const regenerateVideoPromptsForSelected = async () => {
+  if (selectedShots.value.length === 0) {
+    ElMessage.warning('请先选择分镜')
+    return
+  }
+  
+  // 确认对话框
+  try {
+    await ElMessageBox.confirm(
+      `确定要重新生成 ${selectedShots.value.length} 个分镜的视频Prompt吗？这将覆盖已有的Prompt。`,
+      '确认重新生成',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  
+  regeneratingPrompt.value = 'batch'
+  let successCount = 0
+  let failCount = 0
+  
+  try {
+    for (const shotId of selectedShots.value) {
+      try {
+        await videoApi.generateVideoPrompt(projectStore.projectId, shotId, { use_template: true })
+        successCount++
+      } catch (e) {
+        console.error(`重新生成 ${shotId} 的Prompt失败:`, e)
+        failCount++
+      }
+    }
+    
+    if (successCount > 0) {
+      ElMessage.success(`成功重新生成 ${successCount} 个视频Prompt`)
+    }
+    if (failCount > 0) {
+      ElMessage.warning(`${failCount} 个重新生成失败`)
+    }
+    
+    fetchData()
+  } catch (e) {
+    ElMessage.error('重新生成过程出错')
+  } finally {
+    regeneratingPrompt.value = null
   }
 }
 
@@ -1005,6 +1110,17 @@ onUnmounted(() => {
   display: flex;
   gap: 10px;
   margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.select-all-bar {
+  margin-bottom: 20px;
+  padding: 10px 15px;
+  background: #f5f7fa;
+  border-radius: 4px;
+  display: flex;
+  gap: 15px;
+  align-items: center;
 }
 
 .demo-form-inline {

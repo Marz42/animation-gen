@@ -180,11 +180,15 @@
               <span>分镜设计提示词 (shot_design)</span>
               <el-tooltip placement="top">
                 <template #content>
-                  可用变量：<br/>
-                  {scene_name} - 场景名称<br/>
-                  {scene_description} - 场景描述<br/>
-                  {characters} - 角色列表（已格式化）<br/>
-                  {script_segment} - 该场景对应的剧本片段
+                  <div style="max-width: 350px;">
+                    <b>可用占位符变量：</b><br/><br/>
+                    [[SCENE_NAME]] - 场景名称<br/>
+                    [[SCENE_DESCRIPTION]] - 场景描述<br/>
+                    [[CHARACTERS]] - 角色列表（已格式化）<br/>
+                    [[SCRIPT_SEGMENT]] - 该场景对应的剧本片段<br/><br/>
+                    <b>重要：</b>LLM应返回的JSON中需包含 <code>character_ids</code> 字段，
+                    用于指定每个分镜实际出场的角色ID列表，避免首帧生成时传入多余角色。
+                  </div>
                 </template>
                 <el-icon style="margin-left: 4px; color: #909399;"><QuestionFilled /></el-icon>
               </el-tooltip>
@@ -193,7 +197,7 @@
               v-model="promptForm.shot_design" 
               type="textarea" 
               :rows="20"
-              placeholder="输入分镜设计提示词...&#10;&#10;可用变量:&#10;{scene_name} - 场景名称&#10;{scene_description} - 场景描述&#10;{characters} - 角色列表（已格式化）&#10;{script_segment} - 该场景对应的剧本片段"
+              placeholder="输入分镜设计提示词...&#10;&#10;可用占位符变量:&#10;[[SCENE_NAME]] - 场景名称&#10;[[SCENE_DESCRIPTION]] - 场景描述&#10;[[CHARACTERS]] - 角色列表（已格式化）&#10;[[SCRIPT_SEGMENT]] - 该场景对应的剧本片段&#10;&#10;LLM应返回的JSON格式需包含:&#10;{&#10;  &quot;shots&quot;: [{&#10;    &quot;type&quot;: &quot;medium&quot;,&#10;    &quot;camera_movement&quot;: &quot;static&quot;,&#10;    &quot;duration&quot;: &quot;5s&quot;,&#10;    &quot;description&quot;: &quot;...&quot;,&#10;    &quot;action&quot;: &quot;...&quot;,&#10;    &quot;character_ids&quot;: [&quot;char_001&quot;, &quot;char_002&quot;]  // 该分镜实际出场的角色ID&#10;  }]&#10;}&#10;&#10;提示：使用双括号格式 [[VARIABLE]] 来插入变量"
             />
           </el-form-item>
         </el-form>

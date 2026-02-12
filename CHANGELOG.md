@@ -6,6 +6,16 @@
 
 #### 代码级 Bug 修复
 - ✅ 修复 `src/main.py` 缺失 `import random` - 导致视频页重新生成首帧失败
+- ✅ **修复硬编码API密钥** - 使用 `settings.jiekouai_api_key` 从环境变量读取
+- ✅ **修复错误类名** - `InterfaceAIService` → `ImageService`（通用接口）
+- ✅ **修复分镜角色关联** - 每个分镜只关联实际出场的角色（而非场景所有角色）
+- ✅ **修复首帧生成超时** - 图片压缩改为异步执行，添加超时保护
+- ✅ **修复配置保存失效** - 统一使用JSON格式保存，与加载优先级一致
+
+#### 占位符变量统一
+- ✅ 统一使用 `[[VARIABLE_NAME]]` 双括号格式
+- ✅ 更新所有提示词模板
+- ✅ 前端编辑界面添加详细占位符说明
 
 ### 🔥 新增功能：无人值守批量生成流水线
 
@@ -55,6 +65,31 @@ POST /api/projects/{id}/batch-jobs/{jid}/cancel  # 取消作业
 - ✅ 预定义配置: 接口AI Sora-2 (4s/8s/12s), 可灵 (5s/10s), Runway (4s/10s)
 - ✅ 前端动态显示提供商支持的参数选项
 - ✅ API 端点 `/api/video-provider` 返回详细配置信息
+
+### ✨ 功能增强
+
+#### 视频Prompt批量重新生成
+- ✅ **全选操作**: 一键选择所有分镜/有Prompt的/无Prompt的
+- ✅ **重新生成按钮**: 为已选分镜重新生成Prompt（覆盖已有）
+- ✅ **智能过滤**: "生成"按钮只处理没有Prompt的分镜
+- ✅ **批量统计**: 显示成功/失败数量
+
+#### 首帧生成性能优化
+- ✅ **异步图片压缩**: 使用线程池避免阻塞事件循环
+- ✅ **超时保护**: 图片下载60秒超时，HTTP请求180秒超时
+- ✅ **性能监控**: 详细耗时日志，便于排查问题
+
+### 📝 新增文档
+- ✅ `docs/BUGFIX_CHARACTER_IDS.md` - 分镜角色关联Bug修复说明
+- ✅ `docs/BUGFIX_PROMPT_TEMPLATE_SAVE.md` - 提示词模板保存Bug修复说明
+- ✅ `docs/CHARACTER_FILTER_EXPLANATION.md` - 角色过滤问题详细解释
+- ✅ `docs/KEYFRAME_GENERATION_ANALYSIS.md` - 首帧生成逻辑深度分析
+- ✅ `docs/KEYFRAME_TIMEOUT_TROUBLESHOOTING.md` - 首帧生成超时排查指南
+- ✅ `docs/PROMPT_PLACEHOLDERS.md` - 占位符变量参考文档
+- ✅ `docs/VIDEO_PROMPT_BATCH_REGENERATE.md` - 视频Prompt批量重生成说明
+
+### 🔧 新增工具
+- ✅ `fix_shot_characters.py` - 修复已有分镜的角色关联问题
 
 ### 新增功能
 

@@ -1138,7 +1138,7 @@ async def check_video_status(project_id: str, shot_id: str):
                     video_config = {
                         "default": "jiekouai",
                         "jiekouai": {
-                            "api_key": "sk_affBAM8S-pxy_fOTCLKwqGZMTR3uJY7C35HZKDhufHo",
+                            "api_key": settings.jiekouai_api_key or "",
                             "base_url": "https://api.jiekou.ai",
                         }
                     }
@@ -1460,22 +1460,21 @@ async def regenerate_keyframe_from_video(project_id: str, shot_id: str, request:
             # 提交首帧生成任务
             async def do_regenerate():
                 try:
-                    from src.services.jiekouai_service import InterfaceAIService
+                    # 使用通用的ImageService（自动根据配置选择提供商）
+                    from src.services.image_service import ImageService
                     
-                    image_service = InterfaceAIService()
+                    image_service = ImageService()
                     
                     # 生成新seed（如果没有提供）
                     new_seed = request.seed if request.seed is not None else random.randint(1, 999999999)
                     
-                    # 使用已有的参考图（如果有）
-                    ref_images = []
-                    
-                    # 调用图片生成
+                    # 调用图片生成（使用通用接口，自动适配不同提供商）
                     result = await image_service.generate_image(
                         prompt=shot.image_prompt.positive if shot.image_prompt else shot.description,
-                        negative_prompt=shot.image_prompt.negative if shot.image_prompt else None,
-                        seed=new_seed,
-                        reference_images=ref_images
+                        negative_prompt=shot.image_prompt.negative if shot.image_prompt else "",
+                        width=1280,
+                        height=720,
+                        seed=new_seed
                     )
                     
                     if result.get("success"):
@@ -1702,11 +1701,8 @@ async def update_prompts(request: UpdatePromptsRequest):
     if request.video_prompt is not None:
         config.prompts["video_prompt"] = request.video_prompt
     
-    # 保存到全局配置
-    config_path = Path.home() / ".animation_gen" / "config.yaml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(config_path, 'w', encoding='utf-8') as f:
-        yaml.dump(config.model_dump(), f, allow_unicode=True, default_flow_style=False)
+    # 保存到全局配置（使用JSON格式，与load_global的加载优先级一致）
+    config.save_global_config(use_json=True)
     
     return {"status": "updated"}
 
