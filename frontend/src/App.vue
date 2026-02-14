@@ -41,6 +41,10 @@
           <el-icon><Histogram /></el-icon>
           <span>队列状态</span>
         </el-menu-item>
+        <el-menu-item index="/prompts">
+          <el-icon><EditPen /></el-icon>
+          <span>提示词管理</span>
+        </el-menu-item>
         <el-menu-item index="/settings">
           <el-icon><Setting /></el-icon>
           <span>设置</span>

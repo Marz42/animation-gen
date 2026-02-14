@@ -27,6 +27,9 @@
               <el-button type="info" @click="showPromptDialog = true">
                 <el-icon><Setting /></el-icon>编辑提示词
               </el-button>
+              <el-button type="success" @click="showExportDialog = true" :disabled="shots.length === 0">
+                <el-icon><Document /></el-icon>导出分镜剧本
+              </el-button>
             </div>
           </div>
         </template>
@@ -209,13 +212,58 @@
         </template>
       </el-dialog>
     </template>
+
+    <!-- 导出分镜剧本对话框 -->
+    <el-dialog v-model="exportDialog.visible" title="导出分镜剧本" width="600px">
+      <el-alert
+        title="将分镜数据与原始剧本结合，生成带有分镜设计和对话强调的新版剧本"
+        type="info"
+        :closable="false"
+        style="margin-bottom: 15px;"
+      />
+      <el-form label-width="120px">
+        <el-form-item label="导出格式">
+          <el-radio-group v-model="exportForm.format">
+            <el-radio label="markdown">Markdown (.md)</el-radio>
+            <el-radio label="html">HTML (.html)</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="包含内容">
+          <el-checkbox v-model="exportForm.include_dialogue">强调人物对话</el-checkbox>
+          <el-checkbox v-model="exportForm.include_camera_info">镜头信息（类型/运动/时长）</el-checkbox>
+          <el-checkbox v-model="exportForm.include_action">动作描述</el-checkbox>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="exportDialog.visible = false">取消</el-button>
+        <el-button type="primary" @click="previewExport" :loading="exportForm.previewLoading">
+          预览
+        </el-button>
+        <el-button type="success" @click="confirmExport" :loading="exportForm.loading">
+          导出
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 预览对话框 -->
+    <el-dialog v-model="previewDialog.visible" title="分镜剧本预览" width="900px" top="5vh">
+      <div class="script-preview">
+        <pre>{{ previewDialog.content }}</pre>
+      </div>
+      <template #footer>
+        <el-button @click="previewDialog.visible = false">关闭</el-button>
+        <el-button type="success" @click="downloadExport" :loading="exportForm.loading">
+          下载文件
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { QuestionFilled, Edit, Refresh } from '@element-plus/icons-vue'
+import { QuestionFilled, Edit, Refresh, Document } from '@element-plus/icons-vue'
 import { shotApi, promptApi } from '../api'
 import { useProjectStore } from '../stores/project'
 
@@ -224,6 +272,26 @@ const shots = ref([])
 const loading = ref(false)
 const designing = ref(false)
 let timer = null
+
+// 导出对话框
+const exportDialog = ref({
+  visible: false
+})
+
+const exportForm = ref({
+  format: 'markdown',
+  include_dialogue: true,
+  include_camera_info: true,
+  include_action: true,
+  loading: false,
+  previewLoading: false
+})
+
+// 预览对话框
+const previewDialog = ref({
+  visible: false,
+  content: ''
+})
 
 // 重新设计对话框
 const redesignDialog = ref({
@@ -373,6 +441,81 @@ const confirmRedesign = async () => {
   }
 }
 
+// 导出分镜剧本
+const confirmExport = async () => {
+  exportForm.value.loading = true
+  try {
+    const res = await shotApi.exportShotScript(projectStore.projectId, {
+      format: exportForm.value.format,
+      include_dialogue: exportForm.value.include_dialogue,
+      include_camera_info: exportForm.value.include_camera_info,
+      include_action: exportForm.value.include_action
+    })
+    
+    exportDialog.value.visible = false
+    ElMessage.success(`分镜剧本已导出: ${res.data.filename}`)
+    
+    // 提供下载
+    if (res.data.file_path) {
+      // 创建下载链接
+      const link = document.createElement('a')
+      link.href = `/static/${res.data.file_path.split('animation_projects/')[1]}`
+      link.download = res.data.filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    }
+  } catch (e) {
+    ElMessage.error('导出失败')
+  } finally {
+    exportForm.value.loading = false
+  }
+}
+
+// 预览分镜剧本
+const previewExport = async () => {
+  exportForm.value.previewLoading = true
+  try {
+    const res = await shotApi.previewShotScript(projectStore.projectId)
+    previewDialog.value.content = res.data.content
+    previewDialog.value.visible = true
+  } catch (e) {
+    ElMessage.error('预览失败')
+  } finally {
+    exportForm.value.previewLoading = false
+  }
+}
+
+// 下载导出的文件
+const downloadExport = async () => {
+  exportForm.value.loading = true
+  try {
+    const res = await shotApi.exportShotScript(projectStore.projectId, {
+      format: exportForm.value.format,
+      include_dialogue: exportForm.value.include_dialogue,
+      include_camera_info: exportForm.value.include_camera_info,
+      include_action: exportForm.value.include_action
+    })
+    
+    previewDialog.value.visible = false
+    
+    // 创建下载链接
+    if (res.data.file_path) {
+      const link = document.createElement('a')
+      link.href = `/static/${res.data.file_path.split('animation_projects/')[1]}`
+      link.download = res.data.filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    }
+    ElMessage.success('文件已下载')
+  } catch (e) {
+    ElMessage.error('下载失败')
+  } finally {
+    exportForm.value.loading = false
+  }
+}
+
 onMounted(() => {
   fetchData()
   loadPromptConfig()
@@ -463,5 +606,22 @@ onUnmounted(() => {
 
 .mr-2 {
   margin-right: 8px;
+}
+
+.script-preview {
+  max-height: 60vh;
+  overflow-y: auto;
+  background: #f5f7fa;
+  padding: 15px;
+  border-radius: 4px;
+}
+
+.script-preview pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.6;
 }
 </style>

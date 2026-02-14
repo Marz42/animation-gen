@@ -39,6 +39,10 @@ export const shotApi = {
   update: (projectId, shotId, data) => api.put(`/projects/${projectId}/shots/${shotId}`, data),
   editPrompt: (projectId, shotId, data) => api.post(`/projects/${projectId}/shots/${shotId}/edit-prompt`, data),
   redesign: (projectId, shotId, data) => api.post(`/projects/${projectId}/shots/${shotId}/redesign`, data),
+  // 导出分镜剧本
+  exportShotScript: (projectId, data) => api.post(`/projects/${projectId}/export-shot-script`, data),
+  // 预览分镜剧本
+  previewShotScript: (projectId) => api.get(`/projects/${projectId}/export-shot-script/preview`),
 }
 
 // 首帧

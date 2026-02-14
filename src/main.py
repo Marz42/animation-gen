@@ -277,12 +277,33 @@ async def parse_script(project_id: str, background_tasks: BackgroundTasks):
                     name=s.get("name", ""),
                     description=s.get("description", ""),
                     location=s.get("location", ""),
-                    time=s.get("time", "")
+                    time=s.get("time", ""),
+                    character_names=s.get("characters", []),  # 保存场景关联的角色名称列表
+                    script_segment=s.get("script_segment", "")  # 保存场景对应的剧本片段
                 )
                 for i, s in enumerate(scenes_data)
             ]
             project_manager.save_scenes(project, scenes)
             print(f"💾 场景保存完成: {len(scenes_data)} 个")
+            
+            # ============ 调试输出：保存的数据摘要 ============
+            print("\n" + "="*60)
+            print("📊 剧本解析 - 保存的数据摘要")
+            print("="*60)
+            print(f"\n🎭 角色 ({len(characters)} 个):")
+            for char in characters:
+                print(f"   - {char.character_id}: {char.name}")
+                print(f"     描述: {char.description[:60]}...")
+            
+            print(f"\n🎬 场景 ({len(scenes)} 个):")
+            for scene in scenes:
+                print(f"\n   {scene.scene_id}: {scene.name}")
+                print(f"   地点: {scene.location}, 时间: {scene.time}")
+                print(f"   角色: {scene.character_names}")
+                print(f"   剧本片段长度: {len(scene.script_segment)} 字符")
+                if scene.script_segment:
+                    print(f"   剧本片段预览: {scene.script_segment[:150]}...")
+            print("="*60 + "\n")
             
             # 更新状态
             project.current_stage = "pending_review_extraction"
@@ -489,15 +510,23 @@ async def design_shots(project_id: str, request: DesignShotsRequest):
         shot_design_service = ShotDesignService()
         all_shots = []
         
+        # 建立角色名到角色对象的映射
+        char_name_map = {c.name: c for c in characters}
+        
         for scene in scenes:
-            # 获取场景中的角色
-            scene_chars = [char_dict[cid] for cid in scene.shots if cid in char_dict]
-            if not scene_chars:
-                # 如果场景没有关联角色，使用所有角色
-                scene_chars = characters
+            # 正确获取场景中的角色（通过角色名称匹配）
+            scene_chars = []
+            for char_name in scene.character_names:
+                if char_name in char_name_map:
+                    scene_chars.append(char_name_map[char_name])
             
-            # 提取剧本片段（简化处理，实际应该更智能地分割）
-            script_segment = _extract_scene_script(script, scene.name)
+            if not scene_chars:
+                # 如果场景没有关联角色，使用所有角色（兼容旧数据）
+                scene_chars = characters
+                print(f"⚠️ 场景 {scene.scene_id} 没有角色名称列表，使用所有角色")
+            
+            # 获取剧本片段：优先使用场景保存的剧本片段（从剧本解析获得）
+            script_segment = scene.script_segment if scene.script_segment else _extract_scene_script(script, scene.name)
             
             # 生成分镜
             shots = await shot_design_service.design_shots_for_scene(
@@ -517,6 +546,29 @@ async def design_shots(project_id: str, request: DesignShotsRequest):
         # 保存所有分镜
         project_manager.save_shots(project, all_shots)
         project_manager.save_scenes(project, scenes)
+        
+        # ============ 调试输出：分镜设计结果摘要 ============
+        print("\n" + "="*60)
+        print("📊 分镜设计 - 结果摘要")
+        print("="*60)
+        print(f"\n总计: {len(all_shots)} 个分镜\n")
+        
+        # 按场景分组显示
+        for scene in scenes:
+            scene_shots = [s for s in all_shots if s.scene_id == scene.scene_id]
+            print(f"\n🎬 {scene.scene_id}: {scene.name} ({len(scene_shots)} 个分镜)")
+            for shot in scene_shots:
+                print(f"\n   🎥 {shot.shot_id}")
+                print(f"      类型: {shot.type.value}, 运镜: {shot.camera_movement.value}, 时长: {shot.duration.value}")
+                print(f"      描述: {shot.description[:80]}...")
+                if shot.action:
+                    print(f"      动作: {shot.action[:80]}...")
+                if shot.image_prompt:
+                    print(f"      图片提示词: {shot.image_prompt.positive[:80]}...")
+                if shot.video_prompt:
+                    print(f"      视频提示词: {shot.video_prompt.description[:80]}...")
+                print(f"      涉及角色: {shot.characters}")
+        print("\n" + "="*60 + "\n")
         
         # 更新项目状态
         project.current_stage = "pending_review_shots"
@@ -2884,6 +2936,78 @@ async def cancel_batch_job(project_id: str, job_id: str):
     if success:
         return {"status": "cancelled"}
     raise HTTPException(status_code=400, detail="无法取消作业")
+
+
+# ============ 分镜剧本导出API ============
+
+class ExportShotScriptRequest(BaseModel):
+    """导出分镜剧本请求"""
+    format: str = "markdown"  # markdown / html
+    include_dialogue: bool = True
+    include_camera_info: bool = True
+    include_action: bool = True
+
+
+@app.post("/api/projects/{project_id}/export-shot-script")
+async def export_shot_script(project_id: str, request: ExportShotScriptRequest):
+    """
+    导出分镜剧本
+    
+    将分镜数据与原始剧本结合，生成带有分镜设计和对话强调的新版剧本
+    """
+    from src.services.script_export_service import ScriptExportService
+    
+    project = project_manager.load_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    
+    try:
+        export_service = ScriptExportService()
+        result = await export_service.export_shot_script(
+            project=project,
+            include_dialogue=request.include_dialogue,
+            include_camera_info=request.include_camera_info,
+            include_action=request.include_action,
+            format_type=request.format
+        )
+        
+        return result
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"导出分镜剧本失败: {str(e)}")
+
+
+@app.get("/api/projects/{project_id}/export-shot-script/preview")
+async def preview_shot_script(project_id: str):
+    """
+    预览分镜剧本内容（不保存文件）
+    """
+    from src.services.script_export_service import ScriptExportService
+    
+    project = project_manager.load_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    
+    try:
+        export_service = ScriptExportService()
+        result = await export_service.export_shot_script(
+            project=project,
+            include_dialogue=True,
+            include_camera_info=True,
+            include_action=True,
+            format_type="markdown"
+        )
+        
+        # 只返回内容，不包含文件路径
+        return {
+            "content": result["content"],
+            "stats": result["stats"]
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"预览分镜剧本失败: {str(e)}")
 
 
 # ============ 主入口 ============

@@ -113,14 +113,41 @@ class LLMService:
             # 如果没有占位符，直接追加剧本
             prompt = f"{prompt_template}\n\n剧本内容：\n{script}"
         
+        # ============ 调试输出：角色提取输入 ============
+        print("\n" + "="*60)
+        print("🎭 LLM角色提取 - 输入Prompt")
+        print("="*60)
+        print(f"Prompt长度: {len(prompt)} 字符")
+        print(f"剧本长度: {len(script)} 字符")
+        print("-"*60)
+        print(prompt[:2000] + "..." if len(prompt) > 2000 else prompt)
+        print("="*60 + "\n")
+        
         response = await self.generate(prompt)
+        
+        # ============ 调试输出：角色提取输出 ============
+        print("\n" + "="*60)
+        print("🎭 LLM角色提取 - 输出响应")
+        print("="*60)
+        print(f"响应长度: {len(response)} 字符")
+        print("-"*60)
+        print(response[:2000] + "..." if len(response) > 2000 else response)
+        print("="*60 + "\n")
         
         # 解析JSON响应
         try:
             data = json.loads(self._extract_json(response))
-            return data.get("characters", [])
-        except json.JSONDecodeError:
-            # 如果解析失败，返回空列表
+            characters = data.get("characters", [])
+            
+            # 输出解析结果
+            print(f"✅ 成功解析角色: {len(characters)} 个")
+            for i, char in enumerate(characters, 1):
+                print(f"   {i}. {char.get('name', 'N/A')} - {char.get('description', 'N/A')[:50]}...")
+            
+            return characters
+        except json.JSONDecodeError as e:
+            print(f"❌ 角色JSON解析失败: {e}")
+            print(f"   尝试解析内容: {self._extract_json(response)[:500]}")
             return []
     
     async def extract_scenes(self, script: str) -> list:
@@ -141,12 +168,45 @@ class LLMService:
             # 如果没有占位符，直接追加剧本
             prompt = f"{prompt_template}\n\n剧本内容：\n{script}"
         
+        # ============ 调试输出：场景提取输入 ============
+        print("\n" + "="*60)
+        print("🎬 LLM场景提取 - 输入Prompt")
+        print("="*60)
+        print(f"Prompt长度: {len(prompt)} 字符")
+        print(f"剧本长度: {len(script)} 字符")
+        print("-"*60)
+        print(prompt[:2000] + "..." if len(prompt) > 2000 else prompt)
+        print("="*60 + "\n")
+        
         response = await self.generate(prompt)
+        
+        # ============ 调试输出：场景提取输出 ============
+        print("\n" + "="*60)
+        print("🎬 LLM场景提取 - 输出响应")
+        print("="*60)
+        print(f"响应长度: {len(response)} 字符")
+        print("-"*60)
+        print(response[:2000] + "..." if len(response) > 2000 else response)
+        print("="*60 + "\n")
         
         try:
             data = json.loads(self._extract_json(response))
-            return data.get("scenes", [])
-        except json.JSONDecodeError:
+            scenes = data.get("scenes", [])
+            
+            # 输出解析结果
+            print(f"✅ 成功解析场景: {len(scenes)} 个")
+            for i, scene in enumerate(scenes, 1):
+                name = scene.get('name', 'N/A')
+                chars = scene.get('characters', [])
+                segment_len = len(scene.get('script_segment', ''))
+                print(f"   {i}. {name} - 角色: {len(chars)} 个, 剧本片段: {segment_len} 字符")
+                if segment_len > 0:
+                    print(f"      片段预览: {scene.get('script_segment', '')[:100]}...")
+            
+            return scenes
+        except json.JSONDecodeError as e:
+            print(f"❌ 场景JSON解析失败: {e}")
+            print(f"   尝试解析内容: {self._extract_json(response)[:500]}")
             return []
     
     async def generate_character_prompt(

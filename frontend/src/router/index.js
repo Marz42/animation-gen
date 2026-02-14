@@ -7,6 +7,7 @@ import Keyframes from '../views/Keyframes.vue'
 import Videos from '../views/Videos.vue'
 import Queue from '../views/Queue.vue'
 import Settings from '../views/Settings.vue'
+import PromptManager from '../views/PromptManager.vue'
 
 const routes = [
   { path: '/', name: 'Projects', component: Projects },
@@ -16,6 +17,7 @@ const routes = [
   { path: '/keyframes', name: 'Keyframes', component: Keyframes },
   { path: '/videos', name: 'Videos', component: Videos },
   { path: '/queue', name: 'Queue', component: Queue },
+  { path: '/prompts', name: 'PromptManager', component: PromptManager },
   { path: '/settings', name: 'Settings', component: Settings },
 ]
 

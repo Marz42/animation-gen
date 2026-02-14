@@ -160,6 +160,12 @@ class Scene(BaseModel):
     atmosphere: Optional[str] = None
     status: EntityStatus = EntityStatus.PENDING
     
+    # 场景关联的角色名称列表（从剧本解析获得）
+    character_names: List[str] = Field(default_factory=list)
+    
+    # 场景对应的剧本片段（从剧本解析获得）
+    script_segment: str = ""
+    
     # 参考图版本管理
     current_version: int = 0
     versions: List[GenerationVersion] = Field(default_factory=list)
